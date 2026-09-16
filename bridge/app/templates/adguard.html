@@ -19,7 +19,14 @@
 {% endif %}
 
 <div class="card">
-  <h2>Standort</h2>
+  <div class="row" style="margin-bottom:12px">
+    <h2 style="margin:0">Standort</h2>
+    <span class="spacer"></span>
+    {% if cache_age is not none %}
+    <span class="small muted">Liste von {{ cache_age|age }}</span>
+    {% endif %}
+    <a class="button small" href="/adguard?refresh=1">Liste aktualisieren</a>
+  </div>
   {% if locations %}
   <form method="post" action="/adguard/location">
     <label>Land bzw. Stadt
@@ -44,6 +51,8 @@
     <p class="small muted">
       Beim Wechsel wird die AdGuard-Verbindung neu aufgebaut. Die WireGuard-Verbindung
       zum UniFi bleibt bestehen – dein LAN merkt davon nur eine kurze Pause.
+      Die Standortliste ist zwischengespeichert, weil AdGuard vor der Antwort den Ping
+      zu jedem Standort misst; „Liste aktualisieren“ holt sie neu und dauert entsprechend.
     </p>
     <button class="primary" type="submit">Standort übernehmen</button>
   </form>

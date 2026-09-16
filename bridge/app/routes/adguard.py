@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Form, Request
 from fastapi.concurrency import run_in_threadpool
@@ -18,12 +19,14 @@ PAUSED_SETTING = watchdog.PAUSED_SETTING
 
 
 @router.get("/adguard")
-def adguard_page(request: Request):
-    locations, raw = adguard.list_locations()
+def adguard_page(request: Request, refresh: int = 0):
+    locations, raw, fetched_at = adguard.list_locations(force=bool(refresh))
+    cache_age = int(time.time()) - fetched_at if fetched_at else None
     return render(
         request, "adguard.html",
         locations=locations,
         locations_raw=raw,
+        cache_age=cache_age,
         selected=watchdog.selected_location(),
         paused=db.get_setting(PAUSED_SETTING) == "1",
     )
