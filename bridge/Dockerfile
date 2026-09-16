@@ -8,15 +8,20 @@
 #
 FROM debian:bookworm-slim
 
+LABEL org.opencontainers.image.title="AdGuard VPN to WireGuard bridge" \
+      org.opencontainers.image.description="WireGuard server on a VPS that forwards peer traffic through AdGuard VPN, with a browser control panel" \
+      org.opencontainers.image.source="https://github.com/isibizi/AdGuardVPNCLI" \
+      org.opencontainers.image.licenses="MIT"
+
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TARGETARCH
 
-# Pin the tun2socks release. Checksums are optional but strongly recommended:
-# download the asset once, run `sha256sum` on it and pass the value as a build
-# arg (see bridge/README.md -> "tun2socks aktualisieren").
+# Pinned tun2socks release. The checksums below were taken from the published
+# assets and verified against the extracted binary (tun2socks-2.6.0). When you
+# bump the version, replace them too - see bridge/README.md.
 ARG TUN2SOCKS_VERSION=v2.6.0
-ARG TUN2SOCKS_SHA256_AMD64=""
-ARG TUN2SOCKS_SHA256_ARM64=""
+ARG TUN2SOCKS_SHA256_AMD64=2c4d9891ca898ecb2b582d158612d44c66793008328852b3465b77828c867e77
+ARG TUN2SOCKS_SHA256_ARM64=a5b326f79585851a7518b1072e1e2610d0a1ca6803b92f0630fcf97c035b5c81
 
 # hexdump (bsdextrautils) and gawk are required by the AdGuard install script.
 RUN apt-get update \
@@ -66,11 +71,11 @@ RUN set -eu; \
     esac; \
     url="https://github.com/xjasonlyu/tun2socks/releases/download/${TUN2SOCKS_VERSION}/tun2socks-linux-${t2s_arch}.zip"; \
     curl -fsSL -o /tmp/tun2socks.zip "$url"; \
-    if [ -n "$t2s_sum" ]; then \
-      echo "${t2s_sum}  /tmp/tun2socks.zip" | sha256sum -c -; \
-    else \
-      echo "WARN: no SHA256 pinned for tun2socks (${t2s_arch}); see bridge/README.md" >&2; \
+    if [ -z "$t2s_sum" ]; then \
+      echo "no SHA256 pinned for tun2socks (${t2s_arch}); refusing to install an unverified binary" >&2; \
+      exit 1; \
     fi; \
+    echo "${t2s_sum}  /tmp/tun2socks.zip" | sha256sum -c -; \
     unzip -p /tmp/tun2socks.zip "tun2socks-linux-${t2s_arch}" > /usr/local/bin/tun2socks; \
     chmod +x /usr/local/bin/tun2socks; \
     rm -f /tmp/tun2socks.zip; \

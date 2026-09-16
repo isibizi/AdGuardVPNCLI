@@ -1,0 +1,36 @@
+# Variante "selbst bauen" - baut das Image lokal aus dem geklonten Repository.
+# Für die normale Installation reicht docker-compose.yml mit dem fertigen Image:
+#
+#   docker compose -f docker-compose.build.yml up -d --build
+#
+services:
+  bridge:
+    build:
+      context: ..
+      dockerfile: bridge/Dockerfile
+    image: adguard-wg-bridge:local
+    container_name: adguard-wg-bridge
+    restart: unless-stopped
+    env_file: .env
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.src_valid_mark: "1"
+    ports:
+      # WireGuard, the only port that must be reachable from the internet.
+      - "${WG_PORT:-51820}:51820/udp"
+      # Control panel, deliberately bound to loopback only. Reach it with
+      #   ssh -L 8080:localhost:8080 <user>@<vps>
+      # or, once a peer exists, at http://10.8.0.1:8080 through the tunnel.
+      - "127.0.0.1:${PANEL_PORT:-8080}:8080"
+    volumes:
+      - ./data:/data
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
