@@ -1,12 +1,25 @@
+# AdGuard VPN -> WireGuard Bridge, fertiges Image aus der GitHub Container Registry.
+#
+# Diese Datei und eine .env sind alles, was du auf dem Server brauchst - das
+# Repository muss nicht geklont werden:
+#
+#   mkdir -p /opt/adguard-bridge && cd /opt/adguard-bridge
+#   curl -fsSLO https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/docker-compose.yml
+#   curl -fsSL  https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/.env.example -o .env
+#   nano .env          # WG_ENDPOINT und PANEL_PASSWORD setzen
+#   docker compose up -d
+#
+# Selbst bauen statt ziehen: docker-compose.build.yml verwenden.
 services:
   bridge:
-    build:
-      context: ..
-      dockerfile: bridge/Dockerfile
-    image: adguard-wg-bridge:local
+    image: ghcr.io/isibizi/adguard-wg-bridge:${BRIDGE_TAG:-latest}
     container_name: adguard-wg-bridge
     restart: unless-stopped
+
+    # env_file statt environment: Werte werden wortwörtlich übernommen, sodass
+    # auch ein Passwort mit $ oder anderen Sonderzeichen ankommt.
     env_file: .env
+
     cap_add:
       - NET_ADMIN
     devices:
@@ -14,12 +27,21 @@ services:
     sysctls:
       net.ipv4.ip_forward: "1"
       net.ipv4.conf.all.src_valid_mark: "1"
+
     ports:
-      # WireGuard, the only port that must be reachable from the internet.
+      # WireGuard - der einzige Port, der aus dem Internet erreichbar sein muss.
       - "${WG_PORT:-51820}:51820/udp"
-      # Control panel, deliberately bound to loopback only. Reach it with
+      # Panel - bewusst nur auf 127.0.0.1. Zugriff per SSH-Tunnel
       #   ssh -L 8080:localhost:8080 <user>@<vps>
-      # or, once a peer exists, at http://10.8.0.1:8080 through the tunnel.
+      # oder, sobald ein Gerät verbunden ist, über http://10.8.0.1:8080.
       - "127.0.0.1:${PANEL_PORT:-8080}:8080"
+
     volumes:
+      # AdGuard-Sitzung, WireGuard-Schlüssel, Gerätedatenbank, Protokolle.
       - ./data:/data
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
