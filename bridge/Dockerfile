@@ -58,7 +58,13 @@ RUN apt-get update \
 # `-a y` is mandatory: without it the script reads from /dev/tty and the build
 # would hang waiting for an answer that can never arrive.
 COPY scripts/release/install.sh /tmp/adguard-install.sh
-RUN sh /tmp/adguard-install.sh -o /opt/adguardvpn_cli -a y -v \
+
+# USER and HOME are set here because the installer runs under `set -u` and reads
+# $USER (in set_is_root and the ownership checks) plus $HOME. A login shell
+# provides both; a Docker build does not, so without them the script aborts with
+# "USER: parameter not set". They are scoped to this RUN rather than declared as
+# ENV so they do not leak into the running container.
+RUN USER=root HOME=/root sh /tmp/adguard-install.sh -o /opt/adguardvpn_cli -a y -v \
     && rm -f /tmp/adguard-install.sh \
     && /opt/adguardvpn_cli/adguardvpn-cli --version
 
