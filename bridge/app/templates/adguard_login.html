@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% set active = 'adguard' %}
+{% block title %}AdGuard-Anmeldung{% endblock %}
+{% block content %}
+<h1>Bei AdGuard anmelden</h1>
+<p class="lead">
+  AdGuard unterstützt seit Version 1.5.10 keinen Login mit Benutzername und Passwort mehr.
+  Stattdessen erzeugt das Panel einen Anmeldelink mit Einmal-Code.
+</p>
+
+<div class="card">
+  <div id="start-box">
+    <p>Klicke auf <em>Anmeldung starten</em>. Der Link erscheint danach hier.</p>
+    <button class="primary" id="start-btn">Anmeldung starten</button>
+  </div>
+
+  <div id="link-box" hidden>
+    <ol class="steps">
+      <li>
+        <strong>Link öffnen</strong>
+        <div class="row" style="margin-top:8px">
+          <a class="button primary" id="login-link" href="#" target="_blank" rel="noopener">
+            Bei AdGuard anmelden
+          </a>
+          <button type="button" id="copy-btn">Link kopieren</button>
+        </div>
+        <div class="small mono muted" id="login-url" style="margin-top:8px;word-break:break-all"></div>
+        <div id="code-box" class="small" style="margin-top:8px" hidden>
+          Einmal-Code: <strong class="mono" id="login-code"></strong>
+        </div>
+      </li>
+      <li>
+        <strong>Oder mit dem Handy scannen</strong>
+        <div class="small muted">
+          Empfohlen, wenn dein LAN bereits über die Bridge läuft: Ist die VPN-Strecke gerade
+          unterbrochen, kommst du aus dem LAN nicht zu AdGuard. Über Mobilfunk klappt es immer.
+        </div>
+        <div class="qr" style="margin-top:10px"><img id="qr" alt="QR-Code für den Anmeldelink" width="190" height="190"></div>
+      </li>
+      <li>
+        <strong>Zurückkommen</strong>
+        <div class="small muted">
+          Das Panel erkennt die Anmeldung selbstständig. Wenn du fertig bist, geht es mit einem
+          Klick schneller.
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" id="speed-btn">Ich habe mich angemeldet</button>
+          <button type="button" id="cancel-btn">Abbrechen</button>
+        </div>
+      </li>
+    </ol>
+    <p class="small muted" id="waiting">⏳ Warte auf die Anmeldung … (Abbruch nach 5 Minuten)</p>
+  </div>
+
+  <div id="result-box" hidden></div>
+
+  <details style="margin-top:18px">
+    <summary class="small muted">Ausgabe von <code>adguardvpn-cli login</code></summary>
+    <pre class="small" id="log"></pre>
+  </details>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const startBox = document.getElementById('start-box');
+const linkBox = document.getElementById('link-box');
+const resultBox = document.getElementById('result-box');
+const logBox = document.getElementById('log');
+let stream = null;
+
+document.getElementById('start-btn').addEventListener('click', async () => {
+  startBox.hidden = true;
+  linkBox.hidden = false;
+  await fetch('/adguard/login/start', { method: 'POST', credentials: 'same-origin' });
+  listen();
+});
+
+function listen() {
+  stream = new EventSource('/adguard/login/stream');
+  stream.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    /* textContent, never innerHTML: everything here comes out of another
+       program's stdout. */
+    logBox.textContent = data.log || '';
+
+    if (data.url) {
+      const link = document.getElementById('login-link');
+      link.href = data.url;
+      document.getElementById('login-url').textContent = data.url;
+      const qr = document.getElementById('qr');
+      if (!qr.src) qr.src = '/adguard/login/qr?t=' + Date.now();
+    }
+    if (data.code) {
+      document.getElementById('code-box').hidden = false;
+      document.getElementById('login-code').textContent = data.code;
+    }
+    if (data.state === 'done') finish(data);
+  };
+  stream.onerror = () => { if (stream) stream.close(); };
+}
+
+function finish(data) {
+  if (stream) stream.close();
+  document.getElementById('waiting').hidden = true;
+  resultBox.hidden = false;
+  if (data.success) {
+    resultBox.className = 'banner ok';
+    resultBox.innerHTML =
+      '<span>✅</span><div><strong>Angemeldet.</strong> Die Bridge verbindet sich jetzt automatisch. ' +
+      '<div style="margin-top:10px"><a class="button primary" href="/adguard">Standort wählen</a> ' +
+      '<a class="button" href="/">Zur Übersicht</a></div></div>';
+    linkBox.hidden = true;
+  } else {
+    resultBox.className = 'banner error';
+    const box = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = 'Die Anmeldung wurde nicht abgeschlossen.';
+    const detail = document.createElement('div');
+    detail.className = 'small mono';
+    detail.textContent = data.error || '';
+    const retry = document.createElement('div');
+    retry.style.marginTop = '10px';
+    retry.innerHTML = '<a class="button primary" href="/adguard/login">Nochmal versuchen</a>';
+    box.append(title, detail, retry);
+    resultBox.textContent = '';
+    resultBox.append(box);
+  }
+}
+
+document.getElementById('speed-btn').addEventListener('click', () => {
+  fetch('/adguard/login/speedup', { method: 'POST', credentials: 'same-origin' });
+});
+document.getElementById('cancel-btn').addEventListener('click', async () => {
+  await fetch('/adguard/login/cancel', { method: 'POST', credentials: 'same-origin' });
+  window.location.href = '/adguard';
+});
+document.getElementById('copy-btn').addEventListener('click', () => {
+  const url = document.getElementById('login-url').textContent;
+  if (url) navigator.clipboard.writeText(url);
+});
+</script>
+{% endblock %}
