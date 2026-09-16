@@ -38,20 +38,52 @@ Ereignisprotokoll.
 
 ## Installation
 
+### Empfohlen: fertiges Image
+
+Du brauchst weder Git noch das Repository – zwei Dateien reichen:
+
 ```bash
-git clone https://github.com/isibizi/AdGuardVPNCLI.git
-cd AdGuardVPNCLI/bridge
-cp .env.example .env
+mkdir -p /opt/adguard-bridge && cd /opt/adguard-bridge
+
+curl -fsSLO https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/docker-compose.yml
+curl -fsSL  https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/.env.example -o .env
+
 nano .env          # mindestens WG_ENDPOINT und PANEL_PASSWORD setzen
-docker compose up -d --build
+docker compose up -d
 ```
 
 `WG_ENDPOINT` ist die öffentliche IP oder der DNS-Name deines VPS – der Wert landet
 in jeder Client-Konfiguration. Ohne ihn funktionieren die heruntergeladenen Configs
 nicht.
 
+Das Image wird für `linux/amd64` und `linux/arm64` gebaut und liegt unter
+`ghcr.io/isibizi/adguard-wg-bridge`. Standardmäßig wird `latest` gezogen; für einen
+festen Stand setzt du in der `.env` z. B. `BRIDGE_TAG=sha-1a2b3c4`.
+
+> **Einmalig nötig, falls der Pull mit `denied` oder `not found` scheitert:** GHCR-Pakete
+> sind anfangs privat. Unter
+> `https://github.com/users/isibizi/packages/container/adguard-wg-bridge/settings`
+> die Sichtbarkeit auf *public* stellen. Alternativ auf dem Server einmal
+> `echo <token> | docker login ghcr.io -u isibizi --password-stdin` mit einem Token
+> mit `read:packages`.
+
+### Alternative: selbst bauen
+
+Wenn du den Code lieber selbst übersetzt oder Änderungen testen willst:
+
+```bash
+git clone https://github.com/isibizi/AdGuardVPNCLI.git
+cd AdGuardVPNCLI/bridge
+cp .env.example .env
+nano .env
+docker compose -f docker-compose.build.yml up -d --build
+```
+
 Der Build dauert beim ersten Mal ein paar Minuten: Er lädt den offiziellen AdGuard-Client
 über `scripts/release/install.sh` aus diesem Repository sowie `tun2socks` herunter.
+
+Damit du das `-f` nicht jedes Mal tippen musst, kannst du in die `.env` schreiben:
+`COMPOSE_FILE=docker-compose.build.yml`.
 
 ## Ersteinrichtung
 
@@ -204,21 +236,29 @@ WireGuard-Serverschlüssel, die Gerätedatenbank (inklusive privater Schlüssel,
 Konfigurationen erneut herunterladen kannst) und das Panel-Passwort. Diese Datenbank
 ist `0600` – behandle sie wie einen Schlüsselbund.
 
-**AdGuard-Client aktualisieren.** Die Version kommt aus `scripts/release/install.sh`,
-das in diesem Repository automatisch mit den Upstream-Releases mitgepflegt wird:
+**Aktualisieren.** Beim fertigen Image:
 
 ```bash
-git pull && docker compose up -d --build
+cd /opt/adguard-bridge
+docker compose pull && docker compose up -d
 ```
 
-**tun2socks aktualisieren und absichern.** Version und Prüfsummen stehen als Build-Args
-im `Dockerfile`. Die Prüfsummen sind standardmäßig leer – der Build warnt dann. So
-pinnst du sie:
+Beim Selbstbauen entsprechend `git pull && docker compose -f docker-compose.build.yml up -d --build`.
+
+Die Version des AdGuard-Clients kommt aus `scripts/release/install.sh`, das in diesem
+Repository automatisch mit den Upstream-Releases mitgepflegt wird – ein neuer Build
+holt also automatisch die aktuelle Version.
+
+**tun2socks aktualisieren.** Version und SHA256-Prüfsummen stehen als Build-Args im
+`Dockerfile` und sind gepinnt; ein fehlender Wert lässt den Build absichtlich
+fehlschlagen, statt eine ungeprüfte Binärdatei zu installieren. Beim Versionswechsel
+beide Summen neu bestimmen:
 
 ```bash
-curl -fsSLO https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-amd64.zip
-sha256sum tun2socks-linux-amd64.zip
-docker compose build --build-arg TUN2SOCKS_SHA256_AMD64=<summe>
+for arch in amd64 arm64; do
+  curl -fsSLO "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-${arch}.zip"
+  sha256sum "tun2socks-linux-${arch}.zip"
+done
 ```
 
 **Tests ausführen** (Entwicklung):
@@ -249,3 +289,7 @@ Dieses Verzeichnis ist eine Ergänzung zum Fork des AdGuard-Tracker-Repositorys.
 Dateien unter `scripts/` werden von einem GitHub-Workflow automatisch mit den
 Upstream-Releases synchronisiert und dürfen **nicht** von Hand geändert werden – der
 Docker-Build benutzt `scripts/release/install.sh` nur.
+
+Der Workflow `.github/workflows/bridge-image.yml` baut das Container-Image und
+veröffentlicht es nach GHCR. Er reagiert ausschließlich auf Änderungen unter `bridge/`
+und fasst die Release-Workflows des Forks nicht an.
