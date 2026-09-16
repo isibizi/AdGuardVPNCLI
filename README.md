@@ -33,6 +33,60 @@
 
 AdGuard VPN CLI provides a command-line interface for managing VPN connection.
 
+## AdGuard VPN → WireGuard Bridge für UniFi
+
+> Diese Ergänzung gibt es nur in diesem Fork und stammt nicht von AdGuard.
+
+AdGuard VPN bietet weder WireGuard noch OpenVPN an, ein UniFi-Gateway kann aber
+ausschließlich WireGuard, OpenVPN oder IPsec als VPN-Client. Das Verzeichnis
+[`bridge/`](bridge/) schließt diese Lücke: ein Docker-Container für einen kleinen
+VPS, der selbst WireGuard bereitstellt und den Verkehr deiner Geräte über den
+SOCKS5-Proxy des AdGuard-Clients ins AdGuard-Netz schiebt.
+
+```
+UniFi Gateway ──WireGuard udp/51820──▶  VPS-Bridge  ──▶ AdGuard VPN ──▶ Internet
+```
+
+Enthalten sind ein Browser-Panel (AdGuard-Anmeldung, Standortwahl, Geräte­verwaltung
+mit Konfigurations-Download und QR-Code, Bandbreiten-Diagramm, Ereignisprotokoll),
+ein fest eingebauter Kill-Switch und ein Watchdog, der die AdGuard-Verbindung
+selbstständig wieder aufbaut.
+
+### Installation auf dem VPS
+
+Auf dem VPS werden weder Git noch das Repository benötigt – zwei Dateien genügen:
+
+```shell
+mkdir -p /opt/adguard-bridge && cd /opt/adguard-bridge
+
+curl -fsSLO https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/docker-compose.yml
+curl -fsSL  https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/.env.example -o .env
+
+nano .env          # WG_ENDPOINT (öffentliche VPS-IP) und PANEL_PASSWORD setzen
+docker compose up -d
+```
+
+Das Image (`ghcr.io/isibizi/adguard-wg-bridge`) wird für `linux/amd64` und
+`linux/arm64` gebaut. Aktualisieren mit `docker compose pull && docker compose up -d`.
+
+Anschließend das Panel per SSH-Tunnel öffnen und dem Assistenten folgen:
+
+```shell
+ssh -L 8080:localhost:8080 root@DEINE-VPS-IP
+# danach im Browser: http://localhost:8080
+```
+
+Sobald das erste Gerät verbunden ist, ist das Panel auch direkt aus dem Tunnel
+unter `http://10.8.0.1:8080` erreichbar.
+
+**Voraussetzungen:** ein VPS mit KVM-Virtualisierung und Kernel ≥ 5.6 (für
+WireGuard im Kernel), Docker mit `compose`-Plugin, ein aktives AdGuard-VPN-Abo
+und ein UniFi-OS-Gateway (UDM, UDM-Pro, UDR, UX, UCG). Der offene UDP-Port 51820
+ist der einzige, der von außen erreichbar sein muss.
+
+Die vollständige Anleitung samt UniFi-Einrichtung, Kill-Switch-Erklärung und
+Fehlersuche steht in **[bridge/README.md](bridge/README.md)**.
+
 ## Installation
 
 To install the latest version of AdGuard VPN CLI, run the following command:
