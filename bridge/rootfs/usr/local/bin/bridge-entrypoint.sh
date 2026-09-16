@@ -49,7 +49,11 @@ then
 fi
 
 # --- network ---------------------------------------------------------------
-/usr/local/bin/bridge-net.sh up
+if ! /usr/local/bin/bridge-net.sh up
+then
+  log 'ERROR: network setup failed. The [bridge-net] lines above say which step.'
+  exit 1
+fi
 
 if ! /usr/local/bin/bridge-wg.sh up
 then
