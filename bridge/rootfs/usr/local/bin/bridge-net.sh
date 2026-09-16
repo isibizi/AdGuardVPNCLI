@@ -222,6 +222,14 @@ case "${1:-}" in
   rc=0
   ip link show "$WG_IF" >/dev/null 2>&1 || { echo "wg0 missing"; rc=1; }
   ip link show "$TUN_IF" >/dev/null 2>&1 || { echo "tun0 missing"; rc=1; }
+  # NO-CARRIER means the device exists but no process is attached to it, i.e.
+  # tun2socks is not running. Without this the container reported itself healthy
+  # while every forwarded packet was being dropped on an interface nobody read.
+  if ip link show "$TUN_IF" 2>/dev/null | grep -q 'NO-CARRIER'
+  then
+    echo "tun0 has no reader - tun2socks is not running"
+    rc=1
+  fi
   ip rule show | grep -q "lookup ${RT_TABLE}" || { echo "policy route missing"; rc=1; }
   iptables -C FORWARD -j "$FWD_CHAIN" 2>/dev/null || { echo "kill switch missing"; rc=1; }
   [ "$(iptables -S FORWARD | head -1)" = '-P FORWARD DROP' ] || { echo "FORWARD policy is not DROP"; rc=1; }

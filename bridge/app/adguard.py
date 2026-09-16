@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 
 from app import runner
+from app.config import SETTINGS
 from app.runner import vpn_lock
 
 BINARY = shutil.which("adguardvpn-cli") or "/opt/adguardvpn_cli/adguardvpn-cli"
@@ -199,19 +200,34 @@ def list_locations(force: bool = False) -> tuple[list[Location], str, int]:
     return [], result.output, 0
 
 
-def probe_exit_ip(through_vpn: bool = True, timeout: int = 10) -> str:
-    """Ask an echo service what the world sees.
+TUNNEL = "tunnel"
+PROXY = "proxy"
+DIRECT = "direct"
 
-    This is the only honest test of the whole chain: the CLI can report
-    "connected" while the tunnel is dead. Comparing this value with the VPS's
-    bare address is what tells you the bridge really works.
+
+def probe_exit_ip(via: str = TUNNEL, timeout: int = 10) -> str:
+    """Ask an echo service what the world sees, over a chosen path.
+
+    TUNNEL sources the request from the bridge's own address inside the tunnel,
+    so the packet takes exactly the route a peer's traffic takes: policy route
+    to table 100, out via tun0, through tun2socks into the SOCKS proxy. This is
+    the only probe that proves the whole chain.
+
+    PROXY talks to the SOCKS proxy directly and therefore skips tun0 entirely.
+    On its own it is misleading - it reports success while tun2socks is dead -
+    but as a second step it separates "AdGuard is down" from "forwarding is
+    broken", which are fixed in completely different ways.
+
+    DIRECT bypasses the VPN and returns the VPS's own address, for the
+    comparison shown on the dashboard.
     """
     args = ["curl", "--silent", "--show-error", "--max-time", str(timeout), "--ipv4"]
-    if through_vpn:
+    if via == PROXY:
         args += ["--proxy", SOCKS_PROXY]
     else:
-        args.append("--noproxy")
-        args.append("*")
+        args += ["--noproxy", "*"]
+        if via == TUNNEL:
+            args += ["--interface", str(SETTINGS.bridge_address)]
     args.append("https://api.ipify.org")
 
     result = runner.run(args, timeout=timeout + 5)
