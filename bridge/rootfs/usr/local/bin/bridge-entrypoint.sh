@@ -13,6 +13,30 @@ log() {
   echo "[bridge] $1" >&2
 }
 
+# Function ensure_machine_id gives the container a stable machine identity.
+#
+# The client reads /etc/machine-id, falling back to /var/lib/dbus/machine-id, to
+# identify the device. A Debian container ships neither, so every start looked
+# like a different machine: the stored session could not be matched, the client
+# reset its configuration to defaults, and a new login was required every single
+# time. The id lives in the volume so it survives a recreated container too, and
+# AdGuard now sees one device instead of a new one on every restart - which also
+# stops the subscription's device limit being consumed.
+ensure_machine_id() {
+  id_file="${DATA_DIR}/machine-id"
+
+  if [ ! -s "$id_file" ]
+  then
+    tr -d '-' < /proc/sys/kernel/random/uuid > "$id_file"
+    chmod 600 "$id_file"
+    log 'stabile Maschinenkennung erzeugt'
+  fi
+
+  cp "$id_file" /etc/machine-id 2>/dev/null || log 'WARN: /etc/machine-id nicht schreibbar'
+  mkdir -p /var/lib/dbus
+  cp "$id_file" /var/lib/dbus/machine-id 2>/dev/null || true
+}
+
 log 'starting AdGuard VPN -> WireGuard bridge'
 
 # --- persistent state ------------------------------------------------------
@@ -21,6 +45,10 @@ chmod 700 "${DATA_DIR}" "${DATA_DIR}/adguard" "${DATA_DIR}/wg"
 
 # Keeps the AdGuard session across container rebuilds, so you only log in once.
 export XDG_DATA_HOME="${DATA_DIR}/adguard"
+
+# Must happen before the client is invoked for the first time - the very first
+# call is what resets the configuration when the identity does not match.
+ensure_machine_id
 
 if [ -z "${WG_ENDPOINT:-}" ]
 then
