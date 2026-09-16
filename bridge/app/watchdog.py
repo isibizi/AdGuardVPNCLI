@@ -10,12 +10,13 @@ an expired session, because no amount of reconnecting fixes a login.
 
 from __future__ import annotations
 
-import socket
-import subprocess
 import sys
 import time
 
-from app import adguard, db, events, state
+from app import adguard, connection, db, events, state
+# Re-exported so the rest of the code (and the tests) keep one obvious home
+# for these, while the implementation lives with the connect sequence.
+from app.connection import gate, probe, restart_tun2socks, socks_ready, wait_for_socks  # noqa: F401
 from app.config import SETTINGS
 from app.runner import vpn_lock
 
@@ -47,61 +48,6 @@ def is_paused() -> bool:
     return db.get_setting(PAUSED_SETTING) == "1"
 
 
-def socks_ready(timeout: float = 1.0) -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", 1080), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
-def wait_for_socks(timeout: int = 45) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if socks_ready():
-            return True
-        time.sleep(1)
-    return False
-
-
-def probe() -> tuple[str, str]:
-    """Check the real data path and classify a failure.
-
-    Returns (exit_ip, fault). fault is empty when traffic flows, "forwarding"
-    when AdGuard is reachable but nothing gets through the tunnel, and "adguard"
-    when neither works. The distinction matters because the two are fixed in
-    opposite ways: reconnecting the VPN does nothing for a dead tun2socks, and
-    restarting tun2socks does nothing for an expired AdGuard session.
-    """
-    exit_ip = adguard.probe_exit_ip(via=adguard.TUNNEL)
-    if exit_ip:
-        return exit_ip, ""
-    if adguard.probe_exit_ip(via=adguard.PROXY, timeout=8):
-        return "", "forwarding"
-    return "", "adguard"
-
-
-def gate(action: str) -> str:
-    try:
-        result = subprocess.run(
-            ["/usr/local/bin/bridge-net.sh", "gate", action],
-            capture_output=True, text=True, timeout=30, check=False,
-        )
-        return result.stdout.strip()
-    except (OSError, subprocess.SubprocessError) as exc:
-        events.record(events.SYSTEM, f"Kill-Switch konnte nicht geschaltet werden: {exc}", events.ERROR)
-        return ""
-
-
-def restart_tun2socks() -> None:
-    """tun2socks holds a connection to the SOCKS listener, which is recreated on
-    every reconnect, so it has to be restarted alongside."""
-    subprocess.run(
-        ["supervisorctl", "-c", SUPERVISOR_CONF, "restart", "tun2socks"],
-        capture_output=True, text=True, timeout=60, check=False,
-    )
-
-
 class Watchdog:
     def __init__(self) -> None:
         self.failures = 0
@@ -121,9 +67,7 @@ class Watchdog:
 
     # -- the reconnect itself ---------------------------------------------
     def reconnect(self, reason: str) -> bool:
-        """Close the gate, rebuild the AdGuard connection, reopen on success."""
-        gate("close")
-        self.publish(gate="closed", vpn_connected=False, busy="reconnect")
+        """Rebuild the AdGuard connection, counting failures towards the backoff."""
         events.record(events.VPN, f"Verbindung wird neu aufgebaut: {reason}", events.WARNING)
 
         location = selected_location()
@@ -134,14 +78,10 @@ class Watchdog:
         )
         target = "fastest" if use_fallback else location
 
-        # disconnect first even when it claims to be disconnected: it clears
-        # half-dead states the CLI otherwise keeps reporting as "connected".
-        adguard.disconnect()
-        result = adguard.connect(target)
+        ok, message, exit_ip = connection.establish(target)
 
-        if not result.ok:
+        if not ok:
             self.failures += 1
-            message = result.output.strip()[-400:] or "unbekannter Fehler"
             if adguard.looks_like_auth_problem(message):
                 self.enter_login_required(message)
                 return False
@@ -150,7 +90,7 @@ class Watchdog:
                 f"Verbindungsaufbau fehlgeschlagen (Versuch {self.failures}): {message}",
                 events.ERROR,
             )
-            self.publish(last_error=message, busy="")
+            self.publish(busy="")
             return False
 
         if use_fallback and not self.fell_back:
@@ -161,38 +101,12 @@ class Watchdog:
                 events.WARNING,
             )
 
-        if not wait_for_socks():
-            self.failures += 1
-            events.record(events.VPN, "SOCKS-Proxy kam nach dem Verbinden nicht hoch.", events.ERROR)
-            self.publish(last_error="SOCKS-Proxy nicht erreichbar", busy="")
-            return False
-
-        restart_tun2socks()
-        time.sleep(3)
-
-        exit_ip, _ = probe()
-        if not exit_ip:
-            self.failures += 1
-            events.record(
-                events.VPN,
-                "Verbindung steht laut Client, aber es geht kein Traffic durch. Neuer Versuch.",
-                events.ERROR,
-            )
-            self.publish(last_error="Kein Traffic durch den Tunnel", busy="")
-            return False
-
         self.failures = 0
         self.probe_failures = 0
         self.reconnects += 1
         self.connected_since = int(time.time())
-        gate("open")
-        status = adguard.status()
-        events.record(events.VPN, f"Verbindung steht (Standort: {status.location or target}, Exit-IP {exit_ip})")
-        self.publish(
-            vpn_connected=True, gate="open", exit_ip=exit_ip, login_required=False,
-            vpn_location=status.location or target, connected_since=self.connected_since,
-            last_error="", busy="",
-        )
+        events.record(events.VPN, f"Verbindung steht (Standort: {message}, Exit-IP {exit_ip})")
+        self.publish(connected_since=self.connected_since)
         return True
 
     def enter_login_required(self, detail: str) -> None:
