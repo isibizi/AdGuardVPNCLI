@@ -75,7 +75,28 @@ Policy-Route umgeleitet.
 
 ## Installation
 
-### Empfohlen: fertiges Image
+### Schnellinstallation (ein Befehl)
+
+Auf einem frischen VPS, als root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/install-on-vps.sh | sh
+```
+
+Das Skript prüft, ob WireGuard im Kernel liegt, installiert Docker falls nötig, legt
+`/opt/adguard-bridge` an, erzeugt eine `.env` mit zufälligem Panel-Passwort, erkennt die
+öffentliche IP, gibt den WireGuard-Port in `ufw` bzw. `firewalld` frei und startet den
+Container. Am Ende stehen das Passwort und der SSH-Tunnel-Befehl auf dem Bildschirm.
+
+Ein erneuter Aufruf ist ein Update: Die vorhandene `.env` bleibt unangetastet, nur Image
+und Compose-Datei werden aktualisiert. Steht der Server hinter NAT oder soll ein DNS-Name
+in die Client-Configs, gib den Endpoint mit:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/install-on-vps.sh | sh -s -- vpn.example.org
+```
+
+### Von Hand: fertiges Image
 
 Du brauchst weder Git noch das Repository – zwei Dateien reichen:
 
@@ -324,6 +345,7 @@ python -m pytest
 
 | Pfad | Inhalt |
 |---|---|
+| `install-on-vps.sh` | Einrichtungsskript für einen frischen VPS (siehe Schnellinstallation). |
 | `bridge/` | Die Bridge: Dockerfile, Compose-Dateien, Netzwerk- und Watchdog-Skripte (`rootfs/`), das Panel (`app/`) und die Tests. |
 | `scripts/` | Die offiziellen Installationsskripte von AdGuard. Ein GitHub-Workflow hält sie automatisch mit den Upstream-Releases synchron – **nicht von Hand ändern.** Der Docker-Build benutzt `scripts/release/install.sh`, um den Client ins Image zu holen; dadurch bringt jeder Build automatisch die aktuelle Client-Version mit. |
 | `.github/workflows/` | `bridge-image.yml` baut und veröffentlicht das Container-Image. `update-install-sh.yml` und `publish-latest.yml` stammen aus dem Fork und spiegeln Upstream-Releases; sie werden von der Bridge nicht angefasst. |
