@@ -60,9 +60,7 @@ def looks_like_auth_problem(text: str) -> bool:
     return any(marker in lowered for marker in _AUTH_MARKERS)
 
 
-def status() -> Status:
-    result = _cli("status", timeout=30)
-    text = result.output
+def parse_status(text: str) -> Status:
     lowered = text.lower()
 
     # "disconnected" contains "connected", so the negative forms are checked first.
@@ -80,6 +78,42 @@ def status() -> Status:
         raw=text,
         auth_required=looks_like_auth_problem(text),
     )
+
+
+def status() -> Status:
+    return parse_status(_cli("status", timeout=30).output)
+
+
+_status_cache: dict = {"at": 0.0, "value": None}
+STATUS_TTL = 5
+
+
+def status_live(ttl: int = STATUS_TTL) -> Status | None:
+    """Ask the client itself, cheaply enough to call on every page render.
+
+    The panel used to read the login state out of its own state file, which the
+    watchdog updates every fifteen seconds at best - and not at all while the
+    bridge is paused or the lock is held. That is how the panel came to show
+    "logged in" while the client had been logged out for minutes and nothing
+    worked, which is the worst thing a status display can do.
+
+    The result is cached for a few seconds and the lock is never waited for: if
+    another action holds it, the last known answer is returned rather than
+    blocking the page or, worse, the watchdog.
+    """
+    now = time.time()
+    cached = _status_cache["value"]
+    if cached is not None and now - _status_cache["at"] < ttl:
+        return cached
+
+    with vpn_lock(blocking=False) as acquired:
+        if not acquired:
+            return cached
+        result = runner.run([BINARY, "status"], timeout=20)
+
+    value = parse_status(result.output)
+    _status_cache.update(at=now, value=value)
+    return value
 
 
 def connect(location: str = "") -> runner.Result:

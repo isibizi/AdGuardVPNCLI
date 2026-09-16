@@ -29,7 +29,7 @@
   {% if message %}<div class="banner ok"><span>✅</span><div>{{ message }}</div></div>{% endif %}
   {% if error %}<div class="banner error"><span>⚠️</span><div>{{ error }}</div></div>{% endif %}
 
-  {% if show_nav|default(true) and state.login_required %}
+  {% if show_nav|default(true) and login_required %}
   <div class="banner error">
     <span>🔑</span>
     <div>
