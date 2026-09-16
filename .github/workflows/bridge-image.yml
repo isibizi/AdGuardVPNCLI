@@ -12,10 +12,6 @@ on:
       - 'bridge/**'
       - 'scripts/release/install.sh'
       - '.github/workflows/bridge-image.yml'
-      # The README is documentation and is never copied into the image, so a
-      # change to it alone has nothing to rebuild. Exclusions are evaluated in
-      # order, so this has to stay below the includes above.
-      - '!bridge/README.md'
   workflow_dispatch:
 
 permissions:
