@@ -16,6 +16,11 @@ services:
     container_name: adguard-wg-bridge
     restart: unless-stopped
 
+    # Disconnecting the AdGuard client cleanly on stop takes a moment, and a
+    # client that gets killed instead loses its session. The default ten seconds
+    # are enough in practice; this leaves room to spare.
+    stop_grace_period: 30s
+
     # env_file statt environment: Werte werden wortwörtlich übernommen, sodass
     # auch ein Passwort mit $ oder anderen Sonderzeichen ankommt.
     env_file: .env

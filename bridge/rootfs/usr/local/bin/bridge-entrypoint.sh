@@ -64,9 +64,28 @@ then
 fi
 
 # --- shutdown --------------------------------------------------------------
-# On stop, take the gate down first so nothing can slip out while the container
-# is going away.
-trap '/usr/local/bin/bridge-net.sh gate close 2>/dev/null || true' INT TERM
+# The AdGuard service is not a child of supervisor: `adguardvpn-cli connect`
+# forks it into the background, so stopping supervisor does not stop it. It was
+# therefore left to be SIGKILLed when the container went away - and a killed
+# client loses its session, which is why the login had to be repeated after
+# every single restart (AdguardTeam/AdGuardVPNCLI#68).
+#
+# So supervisor runs in the background and this script stays as PID 1 to catch
+# the signal and disconnect the client properly first. An `exec` here would
+# replace this shell and with it the trap, which is exactly the bug.
+shutdown() {
+  log 'stopping'
+  /usr/local/bin/bridge-net.sh gate close 2>/dev/null || true
+  log 'disconnecting AdGuard cleanly so the session survives'
+  "$ADGUARD" disconnect >/dev/null 2>&1 || true
+  kill -TERM "$supervisor_pid" 2>/dev/null || true
+  wait "$supervisor_pid" 2>/dev/null || true
+  log 'stopped'
+  exit 0
+}
+trap shutdown INT TERM
 
 log 'handing over to supervisor'
-exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+/usr/bin/supervisord -c /etc/supervisor/supervisord.conf &
+supervisor_pid="$!"
+wait "$supervisor_pid"
