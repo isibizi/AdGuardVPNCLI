@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% set active = 'monitor' %}
+{% block head %}<script src="/static/chart.js" defer></script>{% endblock %}
+{% block content %}
+<h1>Monitor</h1>
+<p class="lead">Wer ist verbunden, wie viel läuft über die Bridge und was ist zuletzt passiert.</p>
+
+<div class="card">
+  <div class="row" style="margin-bottom:12px">
+    <h2 style="margin:0">Bandbreite</h2>
+    <span class="spacer"></span>
+    <div class="tabs" style="border:none;margin:0">
+      {% for key, label in windows.items() %}
+      <a href="/monitor?window={{ key }}{% if kind %}&kind={{ kind }}{% endif %}"
+         class="{{ 'active' if window == key }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div data-chart="bandwidth" data-window="{{ window }}" data-peer="0"></div>
+  <p class="small muted" style="margin-bottom:0">
+    Download ist der Verkehr zu deinen Geräten, Upload der von ihnen. Gemessen wird am
+    WireGuard-Interface, also nach der Verschlüsselung zum UniFi und vor dem AdGuard-Tunnel.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Verbundene Geräte</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Gerät</th><th>Status</th><th class="hide-sm">Verbindet sich von</th>
+        <th class="hide-sm">Letzter Handshake</th>
+        <th class="num">↓ / ↑</th><th class="num hide-sm">Heute</th><th class="num hide-sm">30 Tage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for peer in data.peers %}
+      <tr>
+        <td>
+          <strong>{{ peer.name }}</strong>
+          <div class="small muted mono">{{ peer.address }}</div>
+          {% if peer.networks %}<div class="small muted">LAN: {{ peer.networks|join(', ') }}</div>{% endif %}
+        </td>
+        <td>
+          <span class="pill">
+            <span class="dot {{ 'good' if peer.online else 'idle' }}"></span>
+            {{ 'Online' if peer.online else 'Offline' }}
+          </span>
+        </td>
+        <td class="hide-sm mono small">{{ peer.endpoint or '–' }}</td>
+        <td class="hide-sm muted small">{{ peer.handshake_age|age }}</td>
+        <td class="num small">{{ peer.rate_down|rate }}<br>{{ peer.rate_up|rate }}</td>
+        <td class="num hide-sm">{{ peer.today|bytes }}</td>
+        <td class="num hide-sm">{{ peer.month|bytes }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">Noch kein Gerät angelegt.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="small muted">
+    „Online“ heißt: letzter Handshake jünger als drei Minuten. WireGuard kennt keine
+    dauerhafte Sitzung, deshalb ist der Handshake das verlässlichste Kriterium.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Aktive Quellen</h2>
+  {% if sources %}
+  <table>
+    <thead><tr><th>Adresse</th><th class="num">Offene Verbindungen</th></tr></thead>
+    <tbody>
+      {% for source in sources %}
+      <tr><td class="mono">{{ source.address }}</td><td class="num">{{ source.connections }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted small">Gerade läuft kein Verkehr über die Bridge.</p>
+  {% endif %}
+  <p class="small muted">
+    Siehst du hier nur die Tunnel-Adresse deines UniFi statt einzelner LAN-Geräte, dann
+    NATet das UniFi den Verkehr in den Tunnel. Das ist der Normalfall und kein Fehler –
+    einzelne Geräte werden erst sichtbar, wenn du beim Peer das LAN hinterlegst und UniFi
+    ohne NAT routet.
+    {% if not connection_log_enabled %}
+    Das Detailprotokoll einzelner Verbindungen inklusive Zieladressen ist bewusst
+    abgeschaltet (<code>CONNECTION_LOG=false</code>) – es wäre faktisch ein Surf-Protokoll
+    deines Haushalts.
+    {% endif %}
+  </p>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:12px">
+    <h2 style="margin:0">Ereignisse</h2>
+    <span class="spacer"></span>
+    <a class="button small" href="/monitor/log.txt?kind={{ kind }}&q={{ search }}">Als Textdatei</a>
+  </div>
+
+  <form method="get" action="/monitor" class="row" style="margin-bottom:14px">
+    <input type="hidden" name="window" value="{{ window }}">
+    <select name="kind" style="max-width:200px">
+      <option value="">Alle Bereiche</option>
+      <option value="vpn" {{ 'selected' if kind == 'vpn' }}>AdGuard-Verbindung</option>
+      <option value="peer" {{ 'selected' if kind == 'peer' }}>Geräte</option>
+      <option value="panel" {{ 'selected' if kind == 'panel' }}>Panel</option>
+      <option value="system" {{ 'selected' if kind == 'system' }}>System</option>
+    </select>
+    <input type="text" name="q" value="{{ search }}" placeholder="Suchen …" style="max-width:260px">
+    <button type="submit">Filtern</button>
+  </form>
+
+  <table>
+    <thead><tr><th style="width:170px">Zeitpunkt</th><th style="width:90px">Bereich</th><th>Ereignis</th></tr></thead>
+    <tbody>
+      {% for entry in log %}
+      <tr>
+        <td class="small muted mono" data-ts="{{ entry.ts }}">{{ entry.ts }}</td>
+        <td class="small">
+          <span class="pill">
+            <span class="dot {{ 'critical' if entry.level == 'error' else ('warning' if entry.level == 'warning' else 'good') }}"></span>
+            {{ entry.kind }}
+          </span>
+        </td>
+        <td class="small">{{ entry.message }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">Noch keine Ereignisse.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Timestamps are stored as UTC epochs and rendered in the viewer's own zone. */
+document.querySelectorAll('[data-ts]').forEach((cell) => {
+  const ts = Number(cell.dataset.ts);
+  if (ts) cell.textContent = new Date(ts * 1000).toLocaleString();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% set active = 'dashboard' %}
+{% block content %}
+<h1>Übersicht</h1>
+<p class="lead">Status der Kette <span class="mono">UniFi → WireGuard → VPS → AdGuard → Internet</span>.</p>
+
+{% if endpoint_warning %}
+<div class="banner warn"><span>⚠️</span><div>{{ endpoint_warning }}</div></div>
+{% endif %}
+
+<div class="grid">
+  <div class="card">
+    <div class="stat-label">AdGuard-Verbindung</div>
+    <div class="stat-value" id="vpn-state">…</div>
+    <div class="stat-sub" id="vpn-location"></div>
+    <div class="row" style="margin-top:14px">
+      <form method="post" action="/adguard/connect"><button class="primary">Verbinden</button></form>
+      <form method="post" action="/adguard/disconnect"><button>Trennen</button></form>
+      <a class="button" href="/adguard">Standort</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stat-label">Kill-Switch</div>
+    <div class="stat-value" id="gate-state">…</div>
+    <div class="stat-sub">
+      Fest eingebaut und nicht abschaltbar. Ist die AdGuard-Strecke unterbrochen,
+      wird kein Paket aus dem LAN weitergeleitet.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stat-label">Öffentliche IP</div>
+    <div class="stat-value" id="exit-ip">…</div>
+    <div class="stat-sub" id="ip-compare"></div>
+  </div>
+
+  <div class="card">
+    <div class="stat-label">Verbundene Geräte</div>
+    <div class="stat-value" id="peer-count">…</div>
+    <div class="stat-sub" id="rate-now"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Geräte</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>Status</th><th class="hide-sm">Tunnel-IP</th>
+        <th class="hide-sm">Letzter Handshake</th><th class="num">Aktuell ↓</th><th class="num">Aktuell ↑</th>
+      </tr>
+    </thead>
+    <tbody id="peer-rows">
+      {% for peer in data.peers %}
+      <tr>
+        <td><strong>{{ peer.name }}</strong></td>
+        <td>
+          <span class="pill">
+            <span class="dot {{ 'good' if peer.online else 'idle' }}"></span>
+            {{ 'Online' if peer.online else 'Offline' }}
+          </span>
+        </td>
+        <td class="hide-sm mono">{{ peer.address }}</td>
+        <td class="hide-sm muted">{{ peer.handshake_age|age }}</td>
+        <td class="num">{{ peer.rate_down|rate }}</td>
+        <td class="num">{{ peer.rate_up|rate }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">
+        Noch kein Gerät angelegt. <a href="/peers">Lege jetzt die Konfiguration für dein UniFi-Gateway an.</a>
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Panel-Zugriff</h2>
+  <p class="small">
+    Über den Tunnel erreichst du dieses Panel unter
+    <code>http://{{ bridge_address }}:8080</code> – von jedem verbundenen Gerät und,
+    wenn du beim Peer das LAN hinterlegt hast, auch aus dem Netz hinter dem UniFi.
+    Für die Ersteinrichtung dient der SSH-Tunnel
+    <code>ssh -L 8080:localhost:8080 &lt;user&gt;@{{ endpoint }}</code>.
+  </p>
+</div>
+
+<details class="card">
+  <summary><strong>Diagnose</strong> – Rohausgabe von adguardvpn-cli</summary>
+  <p class="small muted">Nützlich, wenn etwas nicht funktioniert und die Anzeige oben nicht weiterhilft.</p>
+  <pre id="diagnostics" class="small">Wird geladen …</pre>
+</details>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* The dashboard polls instead of holding a socket open: it has to keep working
+   when the connection it monitors is the thing that is broken. */
+async function refresh() {
+  try {
+    const response = await fetch('/api/status', { credentials: 'same-origin' });
+    if (!response.ok) return;
+    const data = await response.json();
+    const vpn = data.vpn;
+
+    const state = document.getElementById('vpn-state');
+    if (vpn.login_required) {
+      state.textContent = 'Anmeldung nötig';
+    } else if (vpn.connected) {
+      state.textContent = 'Verbunden';
+    } else {
+      state.textContent = 'Getrennt';
+    }
+
+    const details = [];
+    if (vpn.location) details.push('Standort: ' + vpn.location);
+    else if (vpn.selected_location) details.push('Gewählt: ' + vpn.selected_location);
+    if (vpn.uptime > 0) details.push('seit ' + Math.floor(vpn.uptime / 60) + ' min');
+    if (vpn.reconnects) details.push(vpn.reconnects + ' Reconnects');
+    if (vpn.last_error) details.push(vpn.last_error);
+    document.getElementById('vpn-location').textContent = details.join(' · ');
+
+    document.getElementById('gate-state').textContent =
+      data.killswitch.traffic_allowed ? 'Durchlass offen' : 'Blockiert';
+
+    document.getElementById('exit-ip').textContent = vpn.exit_ip || '–';
+    const compare = document.getElementById('ip-compare');
+    if (vpn.exit_ip && vpn.vps_ip) {
+      compare.textContent = vpn.exit_ip === vpn.vps_ip
+        ? 'Achtung: identisch mit der VPS-IP ' + vpn.vps_ip + ' – der Traffic läuft NICHT über AdGuard.'
+        : 'VPS-IP wäre ' + vpn.vps_ip + ' – der Unterschied beweist, dass AdGuard wirklich benutzt wird.';
+    } else {
+      compare.textContent = 'Wird beim nächsten Verbindungstest ermittelt.';
+    }
+
+    document.getElementById('peer-count').textContent =
+      data.wireguard.online + ' / ' + data.wireguard.peers;
+    document.getElementById('rate-now').textContent =
+      '↓ ' + formatRate(data.wireguard.rate_down) + '  ↑ ' + formatRate(data.wireguard.rate_up);
+  } catch (error) { /* try again on the next tick */ }
+}
+
+function formatRate(value) {
+  const units = ['B/s', 'kB/s', 'MB/s', 'GB/s'];
+  let index = 0;
+  while (value >= 1000 && index < units.length - 1) { value /= 1000; index += 1; }
+  return value.toFixed(index === 0 ? 0 : 1) + ' ' + units[index];
+}
+
+refresh();
+setInterval(refresh, 5000);
+
+document.querySelector('details').addEventListener('toggle', async function () {
+  if (!this.open) return;
+  const target = document.getElementById('diagnostics');
+  try {
+    const response = await fetch('/api/diagnostics', { credentials: 'same-origin' });
+    const data = await response.json();
+    target.textContent =
+      '$ adguardvpn-cli status\n' + data.status_raw +
+      '\n\n$ adguardvpn-cli license\n' + data.license_raw +
+      '\n\n$ adguardvpn-cli config show\n' + data.config_raw;
+  } catch (error) {
+    target.textContent = 'Diagnose konnte nicht geladen werden.';
+  }
+});
+</script>
+{% endblock %}

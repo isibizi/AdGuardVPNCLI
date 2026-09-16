@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{% block title %}AdGuard VPN Bridge{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🛡️</text></svg>">
+{% block head %}{% endblock %}
+</head>
+<body>
+{% if show_nav|default(true) %}
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">AdGuard&nbsp;Bridge <span>für UniFi</span></div>
+    <nav>
+      <a href="/" class="{{ 'active' if active == 'dashboard' }}">Übersicht</a>
+      <a href="/adguard" class="{{ 'active' if active == 'adguard' }}">AdGuard</a>
+      <a href="/peers" class="{{ 'active' if active == 'peers' }}">Geräte</a>
+      <a href="/monitor" class="{{ 'active' if active == 'monitor' }}">Monitor</a>
+    </nav>
+    <a href="/logout" class="small muted">Abmelden</a>
+  </div>
+</header>
+{% endif %}
+
+<main>
+  {% if message %}<div class="banner ok"><span>✅</span><div>{{ message }}</div></div>{% endif %}
+  {% if error %}<div class="banner error"><span>⚠️</span><div>{{ error }}</div></div>{% endif %}
+
+  {% if show_nav|default(true) and state.login_required %}
+  <div class="banner error">
+    <span>🔑</span>
+    <div>
+      <strong>AdGuard verlangt eine neue Anmeldung.</strong>
+      Solange du nicht angemeldet bist, blockiert der Kill-Switch den gesamten LAN-Verkehr –
+      es gelangt nichts ungeschützt ins Internet.
+      <div style="margin-top:10px"><a class="button primary" href="/adguard/login">Jetzt neu anmelden</a></div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

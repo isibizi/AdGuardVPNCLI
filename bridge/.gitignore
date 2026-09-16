@@ -1,0 +1,7 @@
+# Runtime state: AdGuard session, WireGuard keys, peer database, logs.
+data/
+.env
+
+__pycache__/
+*.pyc
+.pytest_cache/
