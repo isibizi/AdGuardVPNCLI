@@ -15,6 +15,7 @@ router = APIRouter()
 
 def snapshot() -> dict:
     current = state.read()
+    live = adguard.status_live()
     peers = stats.peer_overview()
     online = [p for p in peers if p["online"]]
     rate_up, rate_down = stats.current_rate(stats.TOTAL)
@@ -25,12 +26,15 @@ def snapshot() -> dict:
 
     return {
         "vpn": {
-            "connected": bool(current.get("vpn_connected")),
-            "location": current.get("vpn_location", ""),
+            # The client's own answer wins over the stored one wherever it is
+            # available; the stored value is only a fallback for the moments the
+            # client cannot be asked.
+            "connected": live.connected if live is not None else bool(current.get("vpn_connected")),
+            "location": (live.location if live is not None and live.location else current.get("vpn_location", "")),
             "selected_location": watchdog.selected_location(),
             "exit_ip": current.get("exit_ip", ""),
             "vps_ip": current.get("vps_ip", ""),
-            "login_required": bool(current.get("login_required")),
+            "login_required": live.auth_required if live is not None else bool(current.get("login_required")),
             "uptime": uptime,
             "reconnects": int(current.get("reconnects") or 0),
             "last_error": current.get("last_error", ""),

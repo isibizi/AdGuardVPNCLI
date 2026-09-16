@@ -9,7 +9,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import state
+from app import adguard, state
 from app.config import SETTINGS
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -46,7 +46,15 @@ TEMPLATES.env.filters["age"] = human_age
 
 
 def render(request: Request, template: str, **context):
-    context.setdefault("state", state.read())
+    current = state.read()
+    live = adguard.status_live()
+    context.setdefault("state", current)
+    # Ask the client rather than trusting the stored flag: a stale "logged in"
+    # is what hides the reason nothing works.
+    context.setdefault(
+        "login_required",
+        live.auth_required if live is not None else bool(current.get("login_required")),
+    )
     context.setdefault("settings", SETTINGS)
     context.setdefault("message", request.query_params.get("msg", ""))
     context.setdefault("error", request.query_params.get("err", ""))
