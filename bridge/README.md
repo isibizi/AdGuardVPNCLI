@@ -60,6 +60,13 @@ Das Image wird für `linux/amd64` und `linux/arm64` gebaut und liegt unter
 `ghcr.io/isibizi/adguard-wg-bridge`. Standardmäßig wird `latest` gezogen; für einen
 festen Stand setzt du in der `.env` z. B. `BRIDGE_TAG=sha-1a2b3c4`.
 
+> **Solange die Bridge noch nicht in `master` gemergt ist**, gibt es den Tag `latest`
+> noch nicht – er entsteht erst aus Builds des Standard-Branches. Bis dahin baut der
+> Workflow je einen Tag aus dem Branch-Namen und aus dem Commit (`sha-…`). Setze den
+> passenden in der `.env` als `BRIDGE_TAG` und ersetze in den beiden `curl`-Befehlen
+> oben `master` durch denselben Branch. Welche Tags es gibt, zeigt
+> `docker buildx imagetools inspect ghcr.io/isibizi/adguard-wg-bridge:<tag>`.
+
 > **Einmalig nötig, falls der Pull mit `denied` oder `not found` scheitert:** GHCR-Pakete
 > sind anfangs privat. Unter
 > `https://github.com/users/isibizi/packages/container/adguard-wg-bridge/settings`
