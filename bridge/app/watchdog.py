@@ -64,6 +64,23 @@ def wait_for_socks(timeout: int = 45) -> bool:
     return False
 
 
+def probe() -> tuple[str, str]:
+    """Check the real data path and classify a failure.
+
+    Returns (exit_ip, fault). fault is empty when traffic flows, "forwarding"
+    when AdGuard is reachable but nothing gets through the tunnel, and "adguard"
+    when neither works. The distinction matters because the two are fixed in
+    opposite ways: reconnecting the VPN does nothing for a dead tun2socks, and
+    restarting tun2socks does nothing for an expired AdGuard session.
+    """
+    exit_ip = adguard.probe_exit_ip(via=adguard.TUNNEL)
+    if exit_ip:
+        return exit_ip, ""
+    if adguard.probe_exit_ip(via=adguard.PROXY, timeout=8):
+        return "", "forwarding"
+    return "", "adguard"
+
+
 def gate(action: str) -> str:
     try:
         result = subprocess.run(
@@ -153,7 +170,7 @@ class Watchdog:
         restart_tun2socks()
         time.sleep(3)
 
-        exit_ip = adguard.probe_exit_ip()
+        exit_ip, _ = probe()
         if not exit_ip:
             self.failures += 1
             events.record(
@@ -226,7 +243,7 @@ class Watchdog:
                 return CYCLE_SECONDS
 
             self.last_probe = now
-            exit_ip = adguard.probe_exit_ip()
+            exit_ip, fault = probe()
             if exit_ip:
                 self.probe_failures = 0
                 if not self.connected_since:
@@ -240,6 +257,22 @@ class Watchdog:
                 return CYCLE_SECONDS
 
             self.probe_failures += 1
+
+            if fault == "forwarding":
+                # AdGuard answers, but the tunnel carries nothing. Rebuilding the
+                # VPN connection would be the wrong repair; restart the part that
+                # is actually broken and keep the gate shut meanwhile.
+                events.record(
+                    events.SYSTEM,
+                    "AdGuard ist erreichbar, aber durch den Tunnel fließt nichts. "
+                    "tun2socks wird neu gestartet.",
+                    events.WARNING,
+                )
+                gate("close")
+                self.publish(gate="closed", last_error="tun2socks leitet nicht weiter")
+                restart_tun2socks()
+                return CYCLE_SECONDS
+
             if self.probe_failures >= PROBE_FAILURES_BEFORE_RECONNECT:
                 # The client claims to be connected but nothing gets through.
                 # This zombie state is why status alone is not trusted.
@@ -259,7 +292,7 @@ class Watchdog:
         if backend_file.exists():
             backend = backend_file.read_text().strip()
 
-        vps_ip = adguard.probe_exit_ip(through_vpn=False)
+        vps_ip = adguard.probe_exit_ip(via=adguard.DIRECT)
         self.publish(wg_backend=backend, vps_ip=vps_ip, gate=gate("state") or "closed")
         events.record(events.SYSTEM, "Watchdog gestartet, Kill-Switch ist scharf.")
 
