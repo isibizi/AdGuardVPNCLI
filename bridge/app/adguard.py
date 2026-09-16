@@ -9,6 +9,7 @@ information.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import threading
@@ -160,9 +161,42 @@ def parse_locations(text: str) -> list[Location]:
     return locations
 
 
-def list_locations() -> tuple[list[Location], str]:
+LOCATIONS_CACHE = "locations_cache"
+LOCATIONS_CACHED_AT = "locations_cached_at"
+LOCATIONS_TTL = 12 * 3600
+
+
+def list_locations(force: bool = False) -> tuple[list[Location], str, int]:
+    """Return the locations, their raw output, and when they were fetched.
+
+    The CLI measures the ping to every location before it answers, which takes
+    long enough to be felt on every page load - and it holds the VPN lock while
+    it does, blocking the watchdog. Locations barely change, so the list is
+    cached and only refreshed on demand or once the cache is half a day old.
+    The ping values are a sorting hint, not a live measurement.
+    """
+    from app import db  # local import keeps this module usable without the DB
+
+    if not force:
+        cached = db.get_setting(LOCATIONS_CACHE)
+        fetched_at = int(db.get_setting(LOCATIONS_CACHED_AT) or 0)
+        if cached and time.time() - fetched_at < LOCATIONS_TTL:
+            locations = [Location(**entry) for entry in json.loads(cached)]
+            if locations:
+                return locations, "", fetched_at
+
     result = _cli("list-locations", timeout=120)
-    return parse_locations(result.output), result.output
+    locations = parse_locations(result.output)
+
+    if locations:
+        now = int(time.time())
+        db.set_setting(LOCATIONS_CACHE, json.dumps([vars(loc) for loc in locations]))
+        db.set_setting(LOCATIONS_CACHED_AT, str(now))
+        return locations, result.output, now
+
+    # Nothing parsed - hand the raw output back so the panel can show it instead
+    # of silently presenting an empty dropdown.
+    return [], result.output, 0
 
 
 def probe_exit_ip(through_vpn: bool = True, timeout: int = 10) -> str:
