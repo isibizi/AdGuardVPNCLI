@@ -29,6 +29,26 @@ log() {
   echo "[bridge-net] $1" >&2
 }
 
+# Function check_forwarding verifies that IPv4 forwarding is enabled.
+#
+# It deliberately does not set it. /proc/sys is read-only inside an unprivileged
+# container and NET_ADMIN does not change that, so writing it fails with
+# "permission denied". The value is applied by docker-compose.yml via `sysctls:`
+# at container creation, which is the only moment it can be applied at all. All
+# that is left here is to confirm it worked.
+check_forwarding() {
+  if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)" = '1' ]
+  then
+    return 0
+  fi
+
+  log 'ERROR: IPv4 forwarding is off - nothing can be routed through the bridge.'
+  log '       docker-compose.yml sets it under `sysctls:`. Check that the entry'
+  log '       is present and recreate the container:'
+  log '         docker compose up -d --force-recreate'
+  return 1
+}
+
 # Function wan_if prints the interface holding the default route, i.e. the way
 # out to the internet. Usually eth0, but never assume.
 wan_if() {
@@ -156,9 +176,12 @@ gate_state() {
 
 case "${1:-}" in
 'up')
-  sysctl -q -w net.ipv4.ip_forward=1
-  # IPv6 is deliberately switched off end to end. tun2socks would not carry it,
-  # so leaving it enabled would mean IPv6 traffic silently bypassing the VPN.
+  check_forwarding
+
+  # Best effort only, and for the same read-only reason usually a no-op. IPv6 is
+  # not a leak path regardless: the container has no IPv6 address on the default
+  # docker bridge, and the peer configurations deliberately omit ::/0, so no IPv6
+  # traffic can enter or leave the tunnel in the first place.
   sysctl -q -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
   sysctl -q -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
 
