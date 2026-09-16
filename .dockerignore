@@ -1,0 +1,5 @@
+.git
+.github
+bridge/data
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% set active = 'peers' %}
+{% block content %}
+<h1>Geräte</h1>
+<p class="lead">
+  Jedes Gerät, das sich per WireGuard mit der Bridge verbindet, bekommt hier eine eigene
+  Konfiguration – das UniFi-Gateway genauso wie ein Handy unterwegs.
+</p>
+
+{% if endpoint_warning %}
+<div class="banner warn"><span>⚠️</span><div>{{ endpoint_warning }}</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>Neues Gerät</h2>
+  <form method="post" action="/peers">
+    <label>Name
+      <input type="text" name="name" required maxlength="41"
+             value="{{ suggested_name }}" placeholder="z. B. UniFi Gateway">
+    </label>
+    <label>Netzwerk hinter diesem Gerät <span class="muted">(optional)</span>
+      <span class="hint">
+        Für das UniFi-Gateway hier dein LAN eintragen, z. B. <code>192.168.1.0/24</code>.
+        Nur dann finden Antwortpakete an deine LAN-Geräte zurück in den Tunnel – und nur dann
+        erreichst du dieses Panel aus dem LAN. Mehrere Netze mit Komma trennen.
+      </span>
+      <input type="text" name="behind_networks" placeholder="192.168.1.0/24">
+    </label>
+    <div class="row" style="margin-top:16px">
+      <button class="primary" type="submit">Anlegen</button>
+    </div>
+  </form>
+</div>
+
+{% for peer in peers %}
+<div class="card">
+  <div class="row">
+    <h2 style="margin:0">{{ peer.name }}</h2>
+    {% if not peer.enabled %}<span class="pill"><span class="dot idle"></span>Deaktiviert</span>{% endif %}
+    <span class="spacer"></span>
+    <span class="mono muted small">{{ peer.address }}</span>
+  </div>
+
+  <div class="row" style="margin-top:14px">
+    <a class="button primary" href="/peers/{{ peer.id }}/config">Konfiguration herunterladen</a>
+    <button type="button" class="qr-toggle" data-peer="{{ peer.id }}">QR-Code anzeigen</button>
+    <form method="post" action="/peers/{{ peer.id }}/toggle">
+      <button>{{ 'Aktivieren' if not peer.enabled else 'Deaktivieren' }}</button>
+    </form>
+    <form method="post" action="/peers/{{ peer.id }}/delete"
+          onsubmit="return confirm('Peer „{{ peer.name }}“ wirklich löschen? Die Konfiguration wird damit ungültig.')">
+      <button class="danger">Löschen</button>
+    </form>
+  </div>
+
+  <div class="qr" id="qr-{{ peer.id }}" hidden style="margin-top:14px"></div>
+
+  <details style="margin-top:14px">
+    <summary class="small muted">Einstellungen ändern</summary>
+    <form method="post" action="/peers/{{ peer.id }}/update">
+      <label>Name<input type="text" name="name" value="{{ peer.name }}" maxlength="41" required></label>
+      <label>Netzwerk dahinter
+        <input type="text" name="behind_networks" value="{{ peer.behind_networks }}" placeholder="192.168.1.0/24">
+      </label>
+      <div class="row" style="margin-top:12px"><button class="primary">Speichern</button></div>
+    </form>
+  </details>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h2>So bindest du das UniFi-Gateway ein</h2>
+  <ol class="steps">
+    <li>Konfiguration oben herunterladen.</li>
+    <li>In der UniFi-Oberfläche: <strong>Settings → VPN → VPN Client → Create New → WireGuard</strong>
+        und die Datei hochladen.</li>
+    <li><strong>Settings → Routing → Traffic Routes</strong>: eine Route <code>0.0.0.0/0</code> anlegen,
+        als Ziel diesen VPN-Client wählen und dein Netzwerk zuweisen. Damit läuft das
+        komplette LAN über die Bridge.</li>
+    <li>DNS in den UniFi-Netzwerkeinstellungen auf <code>{{ settings.peer_dns }}</code> setzen –
+        UniFi ignoriert die <code>DNS=</code>-Zeile importierter Configs.</li>
+    <li>Den UniFi-eigenen Kill-Switch aktivieren. Er ergänzt den auf dem VPS:
+        UniFi merkt, wenn der VPS nicht erreichbar ist, die Bridge merkt, wenn AdGuard ausfällt.</li>
+  </ol>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.qr-toggle').forEach((button) => {
+  button.addEventListener('click', () => {
+    const id = button.dataset.peer;
+    const box = document.getElementById('qr-' + id);
+    if (box.hidden) {
+      if (!box.dataset.loaded) {
+        const image = document.createElement('img');
+        image.src = '/peers/' + id + '/qr';
+        image.width = 190;
+        image.height = 190;
+        image.alt = 'QR-Code der WireGuard-Konfiguration';
+        box.appendChild(image);
+        box.dataset.loaded = '1';
+      }
+      box.hidden = false;
+      button.textContent = 'QR-Code ausblenden';
+    } else {
+      box.hidden = true;
+      button.textContent = 'QR-Code anzeigen';
+    }
+  });
+});
+</script>
+{% endblock %}

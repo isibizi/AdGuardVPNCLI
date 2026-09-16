@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% set active = 'adguard' %}
+{% block content %}
+<h1>AdGuard VPN</h1>
+<p class="lead">Standort wählen und Konto verwalten.</p>
+
+{% if paused %}
+<div class="banner warn">
+  <span>⏸️</span>
+  <div>
+    <strong>Die Bridge ist pausiert.</strong>
+    Du hast die Verbindung manuell getrennt, deshalb baut der Watchdog sie nicht neu auf.
+    Der Kill-Switch blockiert währenddessen den LAN-Verkehr.
+    <div style="margin-top:10px">
+      <form method="post" action="/adguard/connect"><button class="primary">Wieder verbinden</button></form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Standort</h2>
+  {% if locations %}
+  <form method="post" action="/adguard/location">
+    <label>Land bzw. Stadt
+      <span class="hint">
+        Die Liste ist nach Ping sortiert – je kleiner der Wert, desto näher der Server am VPS.
+      </span>
+      <select name="location" id="location-select">
+        <option value="fastest" {{ 'selected' if selected == 'fastest' }}>
+          ⚡ Schnellster Standort (automatisch)
+        </option>
+        {% for country, entries in locations|groupby('country') %}
+        <optgroup label="{{ country }}">
+          {% for location in entries %}
+          <option value="{{ location.value }}" {{ 'selected' if selected == location.value }}>
+            {{ location.label }}
+          </option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="small muted">
+      Beim Wechsel wird die AdGuard-Verbindung neu aufgebaut. Die WireGuard-Verbindung
+      zum UniFi bleibt bestehen – dein LAN merkt davon nur eine kurze Pause.
+    </p>
+    <button class="primary" type="submit">Standort übernehmen</button>
+  </form>
+  {% else %}
+  <div class="banner warn">
+    <span>ℹ️</span>
+    <div>
+      <strong>Es konnten keine Standorte gelesen werden.</strong>
+      Das passiert, solange du nicht bei AdGuard angemeldet bist.
+      <div style="margin-top:10px"><a class="button primary" href="/adguard/login">Bei AdGuard anmelden</a></div>
+    </div>
+  </div>
+  {% if locations_raw %}
+  <h3 style="margin-top:16px">Rohausgabe von <code>adguardvpn-cli list-locations</code></h3>
+  <pre class="small">{{ locations_raw }}</pre>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Konto</h2>
+  <p class="small">
+    AdGuard hat den Login mit Benutzername und Passwort abgeschafft. Die Anmeldung läuft
+    über einen Link mit Einmal-Code, den dieses Panel für dich erzeugt und als QR-Code anzeigt.
+    Dein AdGuard-Passwort wird hier nie eingegeben und nie gespeichert.
+  </p>
+  <div class="row" style="margin-top:14px">
+    <a class="button primary" href="/adguard/login">Neu anmelden</a>
+    <form method="post" action="/adguard/logout"
+          onsubmit="return confirm('Wirklich von AdGuard abmelden? Die Bridge trennt dann die Verbindung.')">
+      <button class="danger">Von AdGuard abmelden</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* A plain <select> with a type-ahead filter beats a custom dropdown: it works
+   with the keyboard, on phones and without any library. */
+(function () {
+  const select = document.getElementById('location-select');
+  if (!select) return;
+  const filter = document.createElement('input');
+  filter.type = 'text';
+  filter.placeholder = 'Land oder Stadt suchen …';
+  filter.style.marginBottom = '8px';
+  select.parentNode.insertBefore(filter, select);
+
+  const groups = Array.from(select.querySelectorAll('optgroup'));
+  filter.addEventListener('input', () => {
+    const needle = filter.value.trim().toLowerCase();
+    groups.forEach((group) => {
+      let visible = 0;
+      Array.from(group.children).forEach((option) => {
+        const match = !needle
+          || option.textContent.toLowerCase().includes(needle)
+          || group.label.toLowerCase().includes(needle);
+        option.hidden = !match;
+        if (match) visible += 1;
+      });
+      group.hidden = visible === 0;
+    });
+  });
+})();
+</script>
+{% endblock %}

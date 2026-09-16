@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% set show_nav = false %}
+{% block title %}Anmelden – AdGuard VPN Bridge{% endblock %}
+{% block content %}
+<div class="card" style="max-width:420px;margin:60px auto">
+  <h1>Panel-Anmeldung</h1>
+  <form method="post" action="/login">
+    <label>Passwort
+      <input type="password" name="password" required autofocus autocomplete="current-password">
+    </label>
+    <div class="row" style="margin-top:18px">
+      <button class="primary" type="submit">Anmelden</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

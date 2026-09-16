@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% set show_nav = false %}
+{% block title %}Einrichtung – AdGuard VPN Bridge{% endblock %}
+{% block content %}
+<div class="card" style="max-width:520px;margin:40px auto">
+  <h1>Willkommen</h1>
+  <p class="lead">
+    Diese Bridge verbindet dein UniFi-Gateway per WireGuard mit AdGuard VPN.
+    Vergib zuerst ein Passwort für dieses Panel.
+  </p>
+  <p class="small muted">
+    Das Panel ist von außen nicht erreichbar, aber jedes Gerät im WireGuard-Tunnel
+    und im LAN dahinter kommt daran – also bitte kein Wegwerf-Passwort.
+  </p>
+  <form method="post" action="/setup">
+    <label>Passwort
+      <span class="hint">mindestens 8 Zeichen</span>
+      <input type="password" name="password" required minlength="8" autofocus autocomplete="new-password">
+    </label>
+    <label>Passwort wiederholen
+      <input type="password" name="confirm" required minlength="8" autocomplete="new-password">
+    </label>
+    <div class="row" style="margin-top:18px">
+      <button class="primary" type="submit">Weiter</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
