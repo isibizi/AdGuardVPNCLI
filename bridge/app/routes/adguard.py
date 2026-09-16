@@ -4,18 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 
 from fastapi import APIRouter, Form, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 
-from app import adguard, db, events, state, watchdog
+from app import adguard, connection, db, events, state, watchdog
 from app.web import redirect, render
 
 router = APIRouter()
 
 PAUSED_SETTING = watchdog.PAUSED_SETTING
+
+
+def start_connect(location: str) -> None:
+    """Kick the connection off now, in the background.
+
+    Previously these routes only recorded the wish and left the work to the
+    watchdog's next cycle - fifteen seconds away at best, a minute during
+    backoff. Nothing visibly happened after the click, so people clicked again.
+    The work runs in a thread so the request returns immediately and the page
+    can report progress; connection.establish takes the cross-process lock, so a
+    second click cannot start a competing attempt.
+    """
+    state.write(busy="Verbindungsaufbau")
+    threading.Thread(target=connection.establish, args=(location,), daemon=True).start()
 
 
 @router.get("/adguard")
@@ -42,19 +57,18 @@ def set_location(location: str = Form(...)):
     db.set_setting(PAUSED_SETTING, "0")
     events.record(events.VPN, f"Standort gewechselt zu '{location}'")
 
-    # Drop the current connection and let the watchdog rebuild it. Routing the
-    # change through the same code path as an automatic reconnect means the kill
-    # switch, the tun2socks restart and the event log all behave identically.
-    adguard.disconnect()
-    state.write(vpn_connected=False, busy="Standortwechsel")
-    return redirect("/adguard", msg=f"Standort '{location}' gespeichert. Die Verbindung wird neu aufgebaut.")
+    # Same sequence an automatic reconnect uses, so the kill switch, the
+    # tun2socks restart and the event log behave identically - only started now
+    # instead of at the watchdog's convenience.
+    start_connect(location)
+    return redirect("/adguard", msg=f"Standort '{location}' gespeichert, die Verbindung wird gerade aufgebaut.")
 
 
 @router.post("/adguard/connect")
 def connect_now():
     db.set_setting(PAUSED_SETTING, "0")
-    state.write(busy="Verbindungsaufbau")
     events.record(events.VPN, "Verbindung manuell angefordert")
+    start_connect(watchdog.selected_location())
     return redirect("/", msg="Verbindung wird aufgebaut.")
 
 

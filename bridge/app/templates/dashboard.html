@@ -105,7 +105,9 @@ async function refresh() {
     const vpn = data.vpn;
 
     const state = document.getElementById('vpn-state');
-    if (vpn.login_required) {
+    if (vpn.busy) {
+      state.textContent = vpn.busy + ' …';
+    } else if (vpn.login_required) {
       state.textContent = 'Anmeldung nötig';
     } else if (vpn.connected) {
       state.textContent = 'Verbunden';

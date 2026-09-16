@@ -38,6 +38,7 @@ def snapshot() -> dict:
             "uptime": uptime,
             "reconnects": int(current.get("reconnects") or 0),
             "last_error": current.get("last_error", ""),
+            "busy": current.get("busy", ""),
         },
         "killswitch": {
             "gate": current.get("gate", "closed"),
