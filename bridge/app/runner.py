@@ -14,6 +14,7 @@ import pty
 import re
 import select
 import subprocess
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -124,20 +125,45 @@ class Result:
 
 
 def run(args: list[str], timeout: int = 60, env: dict[str, str] | None = None) -> Result:
-    """Run a command, never raising for a non-zero exit."""
+    """Run a command, never raising for a non-zero exit.
+
+    Output goes to temporary files rather than pipes, and only the direct child
+    is waited for. That distinction matters: `adguardvpn-cli connect` forks the
+    VPN service into the background and exits. The forked service inherits the
+    standard streams, so with pipes the read would block until that service
+    ends - minutes or hours later - and every connect attempt would look like a
+    timeout even though it had succeeded. A file descriptor the daemon keeps
+    open costs us nothing.
+    """
     merged = dict(os.environ)
     if env:
         merged.update(env)
+
     try:
-        completed = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout,
-            check=False, env=merged,
-        )
-    except subprocess.TimeoutExpired:
-        return Result(124, "", f"Zeitüberschreitung nach {timeout}s: {' '.join(args)}")
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            process = subprocess.Popen(
+                args, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=merged,
+            )
+            try:
+                returncode = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                out.seek(0)
+                err.seek(0)
+                partial = strip_ansi((out.read() + err.read()).decode("utf-8", "replace"))
+                detail = f"\n{partial.strip()[-400:]}" if partial.strip() else ""
+                return Result(124, "", f"Zeitüberschreitung nach {timeout}s: {' '.join(args)}{detail}")
+
+            out.seek(0)
+            err.seek(0)
+            return Result(
+                returncode,
+                strip_ansi(out.read().decode("utf-8", "replace")),
+                strip_ansi(err.read().decode("utf-8", "replace")),
+            )
     except OSError as exc:
         return Result(127, "", f"Konnte '{args[0]}' nicht ausführen: {exc}")
-    return Result(completed.returncode, strip_ansi(completed.stdout), strip_ansi(completed.stderr))
 
 
 @dataclass
