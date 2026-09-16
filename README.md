@@ -1,289 +1,339 @@
-<p align="center">
-<picture>
-<source media="(prefers-color-scheme: dark)" srcset="https://cdn.adguard.com/public/Adguard/Common/Logos/vpn_logo_dark_cli.svg" width="300px" alt="AdGuard VPN CLI" />
-<img src="https://cdn.adguard.com/public/Adguard/Common/Logos/vpn_logo_light_cli.svg?" width="300px" alt="AdGuard VPN CLI" />
-</picture>
-</p>
+# AdGuard VPN → WireGuard Bridge
 
-<h3 align="center">Fast, flexible and reliable VPN solution for command-line enthusiasts</h3>
+Ein WireGuard-Server für einen kleinen VPS, der den Verkehr deines LANs durch AdGuard VPN
+leitet und sich komplett im Browser bedienen lässt. Gebaut für UniFi-Gateways, nutzbar mit
+jedem WireGuard-Client.
 
-<p align="center">
-  Your online safety and anonymity guaranteed by a trusted developer.
-</p>
+> **Inoffizielles Projekt.** Es stammt nicht von AdGuard und wird von AdGuard weder
+> unterstützt noch geprüft. Verwendet wird der offizielle Client *AdGuard VPN CLI*
+> (Closed Source) unverändert so, wie er veröffentlicht wird. Dokumentation zum Client
+> selbst, Release-Signaturen und Fehlerberichte zum Client gehören nach
+> [AdguardTeam/AdGuardVPNCLI](https://github.com/AdguardTeam/AdGuardVPNCLI) – dieses
+> Repository ist ein Fork davon.
 
-<p align="center">
-    <a href="https://adguard-vpn.com/">Website</a> |
-    <a href="https://reddit.com/r/Adguard">Reddit</a> |
-    <a href="https://twitter.com/AdGuard">Twitter</a> |
-    <a href="https://t.me/adguard_en">Telegram</a>
-    <br /><br />
-    <a href="https://github.com/AdguardTeam/AdguardVPNCLI/releases/"><img src="https://img.shields.io/github/tag/AdguardTeam/AdGuardVPNCLI.svg?label=release&filter=*release" alt="Latest release" /></a>
-    <a href="https://github.com/AdguardTeam/AdguardVPNCLI/releases/"><img src="https://img.shields.io/github/tag-pre/AdguardTeam/AdGuardVPNCLI.svg?label=beta&filter=*beta" alt="Beta version" /></a>
-    <a href="https://github.com/AdguardTeam/AdguardVPNCLI/releases/"><img src="https://img.shields.io/github/tag-pre/AdguardTeam/AdGuardVPNCLI.svg?label=nightly&filter=*nightly" alt="Nightly version" /></a>
+## Das Problem
 
-<p align="center">
-<img src="https://cdn.adtidy.org/content/release_notes/vpn/cli/v1.0/adguardvpn-cli_connect.gif" width = "600"px>
-</p>
+AdGuard VPN bietet **kein WireGuard und kein OpenVPN** an. Der offizielle CLI-Client
+spricht nur AdGuards eigene Protokolle (HTTP/2, QUIC) oder stellt einen lokalen
+SOCKS5-Proxy bereit. Ein UniFi-Gateway kann aber ausschließlich WireGuard, OpenVPN oder
+IPsec als VPN-Client. Die beiden passen also nicht zusammen.
 
-> ### Disclaimer
->* AdGuard VPN CLI is not an open source project. We use GitHub as an open bug tracker for users to see what developers are working on. However, we at AdGuard create [a lot of open source software](https://github.com/search?o=desc&q=topic%3Aopen-source+org%3AAdguardTeam+fork%3Atrue&s=stars&type=Repositories).
-> * Privacy policy: https://adguard-vpn.com/privacy.html
-
-## Overview
-
-AdGuard VPN CLI provides a command-line interface for managing VPN connection.
-
-## AdGuard VPN → WireGuard Bridge für UniFi
-
-> Diese Ergänzung gibt es nur in diesem Fork und stammt nicht von AdGuard.
-
-AdGuard VPN bietet weder WireGuard noch OpenVPN an, ein UniFi-Gateway kann aber
-ausschließlich WireGuard, OpenVPN oder IPsec als VPN-Client. Das Verzeichnis
-[`bridge/`](bridge/) schließt diese Lücke: ein Docker-Container für einen kleinen
-VPS, der selbst WireGuard bereitstellt und den Verkehr deiner Geräte über den
-SOCKS5-Proxy des AdGuard-Clients ins AdGuard-Netz schiebt.
+Diese Bridge schließt die Lücke. Sie läuft als ein einziger Docker-Container auf einem
+kleinen VPS, terminiert WireGuard selbst und schiebt den Verkehr deiner Geräte durch den
+SOCKS5-Proxy des AdGuard-Clients:
 
 ```
 UniFi Gateway ──WireGuard udp/51820──▶  VPS-Bridge  ──▶ AdGuard VPN ──▶ Internet
+    (dein LAN)                          │
+                                        │  wg0 ─ Policy-Route ─▶ tun0
+                                        │                         │
+                                        │                     tun2socks
+                                        │                         │
+                                        └──── adguardvpn-cli (SOCKS5 :1080)
 ```
 
-Enthalten sind ein Browser-Panel (AdGuard-Anmeldung, Standortwahl, Geräte­verwaltung
-mit Konfigurations-Download und QR-Code, Bandbreiten-Diagramm, Ereignisprotokoll),
-ein fest eingebauter Kill-Switch und ein Watchdog, der die AdGuard-Verbindung
-selbstständig wieder aufbaut.
+Der SOCKS-Modus ist dabei kein Detail, sondern die Voraussetzung: Im TUN-Modus setzt der
+AdGuard-Client eigene Routen und würde die Pakete des WireGuard-Servers selbst in den
+Tunnel ziehen – die Verbindung würde sich gegenseitig blockieren. Im SOCKS-Modus fasst er
+die Routing-Tabelle nicht an, und nur Pakete aus dem WireGuard-Netz werden per
+Policy-Route umgeleitet.
 
-### Installation auf dem VPS
+## Was sie kann
 
-Auf dem VPS werden weder Git noch das Repository benötigt – zwei Dateien genügen:
+- **Ein Container, ein Befehl.** Fertiges Multi-Arch-Image für `amd64` und `arm64`;
+  auf dem Server genügen eine `docker-compose.yml` und eine `.env`.
+- **Browser-Panel** mit Einrichtungsassistent: AdGuard-Anmeldung, Standortwahl, Geräte,
+  Bandbreite, Ereignisprotokoll.
+- **AdGuard-Anmeldung ohne Passworteingabe.** Seit Client-Version 1.5.10 gibt es kein
+  Login mit Benutzername und Passwort mehr; das Panel erzeugt den Anmeldelink samt
+  Einmal-Code und QR. Dein AdGuard-Passwort wird hier nie eingegeben und nie gespeichert.
+- **Geräteverwaltung.** Beliebig viele WireGuard-Peers, `.conf` zum Download für den
+  UniFi-Import, QR-Code für die Handy-App.
+- **Standortwahl** aus der vollständigen AdGuard-Liste, durchsuchbar und nach Ping
+  sortiert – oder automatisch der schnellste Standort.
+- **Kill-Switch**, fest eingebaut und nicht abschaltbar: Steht die AdGuard-Strecke nicht,
+  verlässt kein Paket aus deinem LAN den VPS.
+- **Automatischer Wiederaufbau.** Ein Watchdog prüft nicht nur den gemeldeten Status,
+  sondern misst aktiv, ob Daten durchkommen, und verbindet selbstständig neu.
+- **Monitor** mit Live-Bandbreite, verbundenen Geräten und filterbarem Ereignisprotokoll.
+- **Nach außen offen ist nur der WireGuard-Port.** Das Panel lauscht auf `127.0.0.1` und
+  ist zusätzlich aus dem Tunnel erreichbar.
 
-```shell
+---
+
+## Was du brauchst
+
+| | |
+|---|---|
+| **VPS** | 1 vCPU, 1 GB RAM reichen. **KVM-Virtualisierung** (nicht LXC/OpenVZ), Kernel ≥ 5.6, damit WireGuard im Kernel läuft. Debian 12 oder Ubuntu 22.04/24.04. |
+| **Docker** | Docker Engine mit dem `compose`-Plugin. |
+| **AdGuard VPN** | Ein aktives Abo. Der VPS zählt als **ein** Gerät – egal wie viele Geräte in deinem LAN dahinter hängen. |
+| **UniFi** | Ein UniFi-OS-Gateway (UDM, UDM-Pro, UDR, UX, UCG) mit WireGuard-VPN-Client. Der alte USG kann kein WireGuard. |
+| **Firewall des VPS** | UDP-Port 51820 muss von außen erreichbar sein. Sonst nichts. |
+
+---
+
+## Installation
+
+### Empfohlen: fertiges Image
+
+Du brauchst weder Git noch das Repository – zwei Dateien reichen:
+
+```bash
 mkdir -p /opt/adguard-bridge && cd /opt/adguard-bridge
 
 curl -fsSLO https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/docker-compose.yml
 curl -fsSL  https://raw.githubusercontent.com/isibizi/AdGuardVPNCLI/master/bridge/.env.example -o .env
 
-nano .env          # WG_ENDPOINT (öffentliche VPS-IP) und PANEL_PASSWORD setzen
+nano .env          # mindestens WG_ENDPOINT und PANEL_PASSWORD setzen
 docker compose up -d
 ```
 
-Das Image (`ghcr.io/isibizi/adguard-wg-bridge`) wird für `linux/amd64` und
-`linux/arm64` gebaut. Aktualisieren mit `docker compose pull && docker compose up -d`.
+`WG_ENDPOINT` ist die öffentliche IP oder der DNS-Name deines VPS – der Wert landet
+in jeder Client-Konfiguration. Ohne ihn funktionieren die heruntergeladenen Configs
+nicht.
 
-Anschließend das Panel per SSH-Tunnel öffnen und dem Assistenten folgen:
+Das Image wird für `linux/amd64` und `linux/arm64` gebaut und liegt unter
+`ghcr.io/isibizi/adguard-wg-bridge`. Standardmäßig wird `latest` gezogen; für einen
+festen Stand setzt du in der `.env` z. B. `BRIDGE_TAG=sha-1a2b3c4`.
 
-```shell
+> **Einmalig nötig, falls der Pull mit `denied` oder `not found` scheitert:** GHCR-Pakete
+> sind anfangs privat. Unter
+> `https://github.com/users/isibizi/packages/container/adguard-wg-bridge/settings`
+> die Sichtbarkeit auf *public* stellen. Alternativ auf dem Server einmal
+> `echo <token> | docker login ghcr.io -u isibizi --password-stdin` mit einem Token
+> mit `read:packages`.
+
+### Alternative: selbst bauen
+
+Wenn du den Code lieber selbst übersetzt oder Änderungen testen willst:
+
+```bash
+git clone https://github.com/isibizi/AdGuardVPNCLI.git
+cd AdGuardVPNCLI/bridge
+cp .env.example .env
+nano .env
+docker compose -f docker-compose.build.yml up -d --build
+```
+
+Der Build dauert beim ersten Mal ein paar Minuten: Er lädt den offiziellen AdGuard-Client
+über `scripts/release/install.sh` aus diesem Repository sowie `tun2socks` herunter.
+
+Damit du das `-f` nicht jedes Mal tippen musst, kannst du in die `.env` schreiben:
+`COMPOSE_FILE=docker-compose.build.yml`.
+
+## Ersteinrichtung
+
+Das Panel ist bewusst **nicht** ins Internet veröffentlicht. Für die Ersteinrichtung
+baust du einen SSH-Tunnel auf – da existiert noch kein WireGuard-Gerät:
+
+```bash
 ssh -L 8080:localhost:8080 root@DEINE-VPS-IP
-# danach im Browser: http://localhost:8080
 ```
 
-Sobald das erste Gerät verbunden ist, ist das Panel auch direkt aus dem Tunnel
-unter `http://10.8.0.1:8080` erreichbar.
+Dann im Browser `http://localhost:8080` öffnen. Der Assistent führt durch vier Schritte:
 
-**Voraussetzungen:** ein VPS mit KVM-Virtualisierung und Kernel ≥ 5.6 (für
-WireGuard im Kernel), Docker mit `compose`-Plugin, ein aktives AdGuard-VPN-Abo
-und ein UniFi-OS-Gateway (UDM, UDM-Pro, UDR, UX, UCG). Der offene UDP-Port 51820
-ist der einzige, der von außen erreichbar sein muss.
+1. **Panel-Passwort vergeben** (oder vorher in der `.env` setzen).
+2. **Bei AdGuard anmelden.** AdGuard hat den Login mit Benutzername und Passwort in
+   Version 1.5.10 abgeschafft. Das Panel erzeugt stattdessen einen Anmeldelink mit
+   Einmal-Code und zeigt ihn als Button, als Text und als QR-Code. Dein AdGuard-Passwort
+   wird hier nie eingegeben und nie gespeichert. Die Sitzung liegt danach in `./data` und
+   überlebt Neustarts.
+3. **Standort wählen.** Durchsuchbare Liste aller AdGuard-Standorte mit Ping, oder
+   „schnellster Standort“ automatisch.
+4. **Gerät anlegen.** Für das UniFi-Gateway; Konfiguration herunterladen.
 
-Die vollständige Anleitung samt UniFi-Einrichtung, Kill-Switch-Erklärung und
-Fehlersuche steht in **[bridge/README.md](bridge/README.md)**.
+## UniFi einrichten
 
-## Installation
+1. **Settings → VPN → VPN Client → Create New → WireGuard**, die heruntergeladene
+   `.conf` hochladen.
+2. **Settings → Routing → Traffic Routes**: eine Route `0.0.0.0/0` anlegen, als Ziel
+   den eben erstellten VPN-Client wählen und dein Netzwerk zuweisen. Damit läuft das
+   komplette LAN über die Bridge. (Du kannst hier später jederzeit einschränken, wenn
+   doch nur einzelne Geräte oder ein VLAN darüber sollen.)
+3. **DNS setzen.** UniFi ignoriert die `DNS=`-Zeile importierter Configs. Trage
+   `94.140.14.14` und `94.140.15.15` in den Netzwerkeinstellungen ein, sonst fragst du
+   weiter den DNS deines Providers – ein klassisches Leck.
+4. **UniFi-Kill-Switch aktivieren.** Er ergänzt den auf dem VPS, siehe unten.
+5. **Optional: das LAN beim Peer hinterlegen.** Trägst du im Panel beim Peer dein
+   LAN-Netz ein (z. B. `192.168.1.0/24`), finden Antwortpakete an deine LAN-Geräte
+   zurück in den Tunnel. Nur dann erreichst du das Panel auch von einem normalen
+   LAN-Client.
 
-To install the latest version of AdGuard VPN CLI, run the following command:
+## Das Panel später erreichen
 
-Release channel:
+Sobald das erste Gerät verbunden ist, brauchst du den SSH-Tunnel nicht mehr:
 
-```shell
-curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/HEAD/scripts/release/install.sh | sh -s -- -v
+**http://10.8.0.1:8080** – von jedem verbundenen WireGuard-Gerät und, bei hinterlegtem
+LAN-Netz, aus dem Netz hinter dem UniFi.
+
+Das gilt auch dann, wenn die AdGuard-Strecke gerade unterbrochen ist: Der Kill-Switch
+blockiert nur *weitergeleiteten* Verkehr, nicht den Zugriff auf die Bridge selbst.
+Genau dann brauchst du das Panel ja.
+
+---
+
+## Der Kill-Switch
+
+Er ist **fest eingebaut und nicht abschaltbar**. Es gibt keine Option dafür.
+
+Die Kette hat zwei Beine, und beide brauchen ihren eigenen Schutz:
+
+| Ausfall | Wer merkt es | Was passiert |
+|---|---|---|
+| VPS nicht erreichbar, WireGuard tot | UniFi-Kill-Switch | UniFi blockiert das LAN |
+| AdGuard-Verbindung weg, WireGuard gesund | **nur die Bridge** | Die Bridge verwirft den Verkehr |
+
+Der zweite Fall ist der gefährliche: WireGuard läuft dann völlig normal weiter,
+Handshakes kommen an, UniFi meldet „verbunden“ und schickt fleißig Daten. Ohne die
+Regeln auf dem VPS würde dieser Verkehr über die nackte VPS-IP ins Internet gehen –
+unbemerkt, weil auf der UniFi-Seite alles grün bleibt.
+
+Technisch: `FORWARD`-Policy ist `DROP`, es gibt genau einen erlaubten Pfad
+(`wg0 → tun0`), und dieser wird vom Watchdog erst freigegeben, wenn er nachgewiesen hat,
+dass wirklich Verkehr durch AdGuard fließt. Dazu eine explizite `DROP`-Regel für
+`wg0 → eth0`. Verworfen wird still (`DROP`, nicht `REJECT`), damit kurze Reconnects
+bestehende TCP-Verbindungen nicht abreißen lassen.
+
+## Automatischer Wiederaufbau
+
+Bricht die Verbindung zwischen VPS und AdGuard ab, baut der Watchdog sie ohne Zutun
+wieder auf:
+
+- Er prüft alle 15 Sekunden den Status **und misst zusätzlich jede Minute aktiv**, ob
+  wirklich Daten durchkommen. Der Client meldet gelegentlich „connected“, obwohl der
+  Tunnel tot ist – dieser Zombie-Zustand wird nur durch die aktive Messung erkannt.
+- Beim Wiederaufbau: `disconnect`, `connect`, warten bis der SOCKS-Proxy lauscht,
+  `tun2socks` neu starten, Durchlass wieder öffnen.
+- Wartezeiten 5 s → 10 s → 20 s → 40 s → danach dauerhaft jede Minute. **Er gibt nie auf.**
+- Ist der gewählte Standort mehrfach nicht erreichbar, weicht er einmal auf den
+  schnellsten aus und vermerkt das im Protokoll (`FALLBACK_TO_FASTEST=false` schaltet
+  das ab).
+- Nur bei abgelaufener Sitzung hilft kein Reconnect: Dann drosselt er auf einen
+  5-Minuten-Takt und das Panel zeigt gut sichtbar „Neu anmelden“.
+- Container-Neustart und VPS-Reboot verbinden ebenfalls automatisch.
+
+Jedes Ereignis landet im Protokoll unter **Monitor → Ereignisse** und in
+`data/events.log`.
+
+## Monitor
+
+- **Bandbreite** – Live-Diagramm für Download und Upload, umschaltbar von 10 Minuten
+  bis 30 Tage. Gemessen am WireGuard-Interface.
+- **Verbundene Geräte** – welches Gerät gerade online ist (letzter Handshake jünger als
+  drei Minuten), von welcher IP es sich verbindet, aktuelle Rate, Volumen heute und im
+  Monat.
+- **Aktive Quellen** – siehst du hier nur `10.8.0.2` statt einzelner LAN-Geräte, dann
+  NATet dein UniFi den Verkehr in den Tunnel. Das ist der Normalfall und kein Fehler.
+- **Ereignisse** – filterbar, als Textdatei herunterladbar.
+
+Ein Detailprotokoll einzelner Verbindungen **mit Zieladressen** ist bewusst
+abgeschaltet (`CONNECTION_LOG=false`) – es wäre faktisch ein Surf-Protokoll deines
+Haushalts.
+
+---
+
+## Fehlersuche
+
+**Teste nie mit `ping`.** `tun2socks` beantwortet ICMP selbst; ein erfolgreiches `ping
+1.1.1.1` beweist gar nichts. Nimm eine echte TCP-Verbindung, etwa eine Webseite oder:
+
+```bash
+curl https://api.ipify.org
 ```
 
-Beta channel:
+Die angezeigte Adresse muss von der IP deines VPS abweichen. Genau diesen Vergleich
+zeigt auch das Dashboard.
 
-```shell
-curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/HEAD/scripts/beta/install.sh | sh -s -- -v
+| Symptom | Ursache und Lösung |
+|---|---|
+| Kein Internet im LAN, Dashboard zeigt „Blockiert“ | Der Kill-Switch arbeitet korrekt – die AdGuard-Strecke steht nicht. Ins Panel schauen: meist ist eine Neuanmeldung fällig. |
+| Exit-IP **ist gleich** der VPS-IP | Der Verkehr läuft an AdGuard vorbei. Sofort im Panel prüfen; normalerweise kann das nicht passieren, weil der Durchlass sonst zu wäre. |
+| Manche Webseiten laden nicht, Downloads brechen ab | MTU. `WG_MTU` in der `.env` auf `1280` senken und `docker compose up -d` erneut ausführen. |
+| Container startet nicht, Log sagt „no WireGuard kernel module“ | Dein VPS ist LXC/OpenVZ. Der Userspace-Fallback (`wireguard-go`) springt ein, ist aber langsamer. Besser: KVM-VPS. |
+| DNS-Anfragen gehen am VPN vorbei | In UniFi den DNS-Server auf die AdGuard-Adressen setzen (siehe oben). UniFi ignoriert die `DNS=`-Zeile der Config. |
+| Anmeldelink lässt sich nicht öffnen | Dein LAN läuft über die tote Bridge. Den QR-Code mit dem Handy über **Mobilfunk** scannen, oder in UniFi die Traffic Route kurz deaktivieren. |
+| Standort wechselt nicht | Nach dem Speichern dauert es bis zu 15 Sekunden, bis der Watchdog neu verbindet. Das Ereignisprotokoll zeigt den Verlauf. |
+
+Rohausgaben des Clients gibt es auf dem Dashboard unter **Diagnose**, ausführliche Logs mit:
+
+```bash
+docker compose logs -f bridge
+docker compose exec bridge cat /data/events.log
+docker compose exec bridge /usr/local/bin/bridge-net.sh status
+docker compose exec bridge wg show
 ```
 
-Nightly channel:
+---
 
-```shell
-curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardVPNCLI/HEAD/scripts/nightly/install.sh | sh -s -- -v
+## Wartung
+
+**Daten sichern.** Alles Wichtige liegt in `./data`: die AdGuard-Sitzung, die
+WireGuard-Serverschlüssel, die Gerätedatenbank (inklusive privater Schlüssel, damit du
+Konfigurationen erneut herunterladen kannst) und das Panel-Passwort. Diese Datenbank
+ist `0600` – behandle sie wie einen Schlüsselbund.
+
+**Aktualisieren.** Beim fertigen Image:
+
+```bash
+cd /opt/adguard-bridge
+docker compose pull && docker compose up -d
 ```
 
-> [!NOTE]
-> You can also install and run the AdGuard VPN CLI Docker container on MikroTik routers with RouterOS. For more information and detailed instructions, refer to our [dedicated guide](https://adguard-vpn.com/kb/adguard-vpn-for-linux/setting-up-on-a-router/mikrotik/).
+Beim Selbstbauen entsprechend `git pull && docker compose -f docker-compose.build.yml up -d --build`.
 
-## Verify Releases
+Die Version des AdGuard-Clients kommt aus `scripts/release/install.sh`, das in diesem
+Repository automatisch mit den Upstream-Releases mitgepflegt wird – ein neuer Build
+holt also automatisch die aktuelle Version.
 
-Inside an archive file there's a small file with `.sig` extension which contains the signature data. In a hypothetic
-situation when the binary file inside an archive is replaced by someone, you'll know that it isn't an official release
-from AdGuard.
+**tun2socks aktualisieren.** Version und SHA256-Prüfsummen stehen als Build-Args im
+`Dockerfile` und sind gepinnt; ein fehlender Wert lässt den Build absichtlich
+fehlschlagen, statt eine ungeprüfte Binärdatei zu installieren. Beim Versionswechsel
+beide Summen neu bestimmen:
 
-To verify the signature, you need to have the `gpg` tool installed.
-
-First, import the AdGuard public key:
-
-```shell
-gpg --keyserver 'keys.openpgp.org' --recv-key '28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6'
+```bash
+for arch in amd64 arm64; do
+  curl -fsSLO "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-${arch}.zip"
+  sha256sum "tun2socks-linux-${arch}.zip"
+done
 ```
 
-Then, verify the signature:
-    
-```shell
-gpg --verify /opt/adguardvpn_cli/adguardvpn-cli.sig 
-```  
+**Tests ausführen** (Entwicklung):
 
-If you use custom installation path, replace `/opt/adguardvpn_cli/adguardvpn-cli.sig` with the path to the signature
-file. It should be in the same directory as the binary file.
-
-You'll see something like this:
-
-```
-gpg: assuming signed data in 'adguardvpn-cli'
-gpg: Signature made Wed Feb 28 19:24:43 2024 +08
-gpg:                using RSA key 28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6
-gpg:                issuer "devteam@adguard.com"
-gpg: Good signature from "AdGuard <devteam@adguard.com>" [ultimate]
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
 ```
 
-Check the following:
-- RSA key: must be `28645AC9776EC4C00BCE2AFC0FE641E7235E2EC6`;
-- issuer name: must be `AdGuard`;
-- E-mail address: must be `devteam@adguard.com`;
+---
 
-There may also be the following warning:
+## Sicherheit und Grenzen
 
-```
-gpg: WARNING: The key's User ID is not certified with a trusted signature!
-gpg:          There is no indication that the signature belongs to the owner.
-Primary key fingerprint: 2864 5AC9 776E C4C0 0BCE  2AFC 0FE6 41E7 235E 2EC6
-```
+- Das Panel ist nur über `127.0.0.1` und über den WireGuard-Tunnel erreichbar, nicht
+  aus dem Internet. Es ist trotzdem passwortgeschützt, denn jedes Gerät im LAN hinter
+  dem UniFi kommt daran.
+- **IPv6 ist auf der ganzen Strecke abgeschaltet.** `tun2socks` transportiert es nicht;
+  wäre es aktiv, liefe IPv6-Verkehr am VPN vorbei. Die erzeugten Configs enthalten
+  deshalb bewusst kein `::/0`.
+- Der SOCKS-Proxy lauscht ausschließlich auf `127.0.0.1` und ist von den Peers aus nicht
+  erreichbar.
+- Gedacht ist das für **deinen eigenen AdGuard-Account und deine eigenen Geräte**. Die
+  Weitergabe des Zugangs an Dritte ist nicht der Zweck dieser Bridge.
 
-## Usage
+## Aufbau des Repositorys
 
-Run `adguardvpn-cli [command]` to use the VPN service. Below are the available commands and their options:
+| Pfad | Inhalt |
+|---|---|
+| `bridge/` | Die Bridge: Dockerfile, Compose-Dateien, Netzwerk- und Watchdog-Skripte (`rootfs/`), das Panel (`app/`) und die Tests. |
+| `scripts/` | Die offiziellen Installationsskripte von AdGuard. Ein GitHub-Workflow hält sie automatisch mit den Upstream-Releases synchron – **nicht von Hand ändern.** Der Docker-Build benutzt `scripts/release/install.sh`, um den Client ins Image zu holen; dadurch bringt jeder Build automatisch die aktuelle Client-Version mit. |
+| `.github/workflows/` | `bridge-image.yml` baut und veröffentlicht das Container-Image. `update-install-sh.yml` und `publish-latest.yml` stammen aus dem Fork und spiegeln Upstream-Releases; sie werden von der Bridge nicht angefasst. |
 
-### General Options
+Weil dies ein Fork ist, kann ein späterer Abgleich mit dem Upstream-Repository auf dieser
+README kollidieren – die ursprüngliche Fassung samt Dokumentation zum Client selbst steht
+unter [AdguardTeam/AdGuardVPNCLI](https://github.com/AdguardTeam/AdGuardVPNCLI).
 
-- `-h, --help`: Print the help message and exit.
-- `--help-all`: Expand all help.
-- `-v, --version`: Display program version information and exit.
+## Lizenz und Marken
 
-### Subcommands
-
-Each subcommand has its own set of options. Run `adguardvpn-cli [command] --help` to see the list of available options.
-
-## Log in and log out
-
-To log in or create an account, type:
-
-    adguardvpn-cli login
-
-When prompted with the menu:
-
-    b - Open link in browser
-    s - Speed up check
-    x - Cancel
-
-select `b` to open the authentication page in your default browser. Enter your email address. Once you are logged in, you will see the message *Successfully logged in* in the Terminal.
-
-You can set up your preferred login method (password or one-time code) and two-factor authentication in your [AdGuard account](https://adguardaccount.com/account/settings).
-
->**Note:**
-You can also create an AdGuard account on our [website](https://auth.adguardaccount.com/login.html) and then log in to AdGuard VPN for Linux using your credentials.
-
-
-To log out of AdGuard VPN, type:
-
-    adguardvpn-cli logout
-
-#### list-locations
-
-List all available VPN locations.
-
-- `count INT`: Number of locations to display, sorted by ping.
-- `--bash-completion TEXT`: List suggestions for bash-completion.
-
-#### connect
-
-Connect to the VPN service.
-
-- `-l, --location TEXT`: Specify the location to connect to (city name, country name, or ISO code). Defaults to the last used location.
-- `-f, --fastest`: Connect to the fastest available location.
-- `-v, --verbose`: Show log from the VPN service.
-- `--no-fork`: Do not fork the VPN service to the background.
-- `-y, --yes`: Automatically answer 'yes' to all questions.
-- `-4, --ipv4only`: Force the application to connect only to IPv4 servers.
-- `-6, --ipv6only`: Force the application to connect only to IPv6 servers.
-
-#### disconnect
-
-Stop the VPN service.
-
-#### status
-
-Display the current status of the VPN service.
-
-#### license
-
-Get license information.
-
-#### config
-
-Configure the VPN service with the following subcommands:
-
-- `set-mode`: Set VPN operating mode (TUN/SOCKS). SOCKS default address is `127.0.0.1:1080`. You can adjust the port number.
-- `set-dns`: Set the DNS upstream server.
-- `set-socks-port`: Set the SOCKS port.
-- `set-socks-host`: Set the SOCKS listen host. For non-localhost addresses, you need to protect the proxy with a username and password.
-- `set-socks-username`: Set the SOCKS username.
-- `set-socks-password`: Set the SOCKS password.
-- `clear-socks-auth`: Clear the SOCKS username and password.
-- `set-change-system-dns`: Set the system DNS servers.
-- `set-tun-routing-mode`: Set VPN tunnel routing mode (AUTO/SCRIPT/NONE).
-- `create-route-script`: Create a route script with proper permissions.
-- `set-crash-reporting`: Send crash reports to developers.
-- `set-update-channel`: Set the update channel (release, beta, nightly).
-- `set-protocol`: Set the protocol used by AdGuard VPN. Available values: `auto`, `http2`, `quic`
-- `set-post-quantum`: Set the use of advanced cryptographic algorithms resistant to quantum computer attacks to protect your traffic from potential future threats.
-- `set-show-hints`: Show hints after command execution.
-- `set-debug-logging`: Enable or disable debug logging.
-- `set-show-notifications`: Show notifications about the VPN connection status.
-- `set-bound-if-override`: Override network interface to use for outbound VPN traffic (pass "" to disable).
-- `show`: Show the current configuration.
-
-#### check-update
-
-Check for updates to the VPN service.
-
-#### export-logs
-
-Export logs to a zip file.
-
-- `-o, --output TEXT`: Path to the output artifact. Can be a directory.
-- `-f, --force`: Overwrite the output artifact without asking.
-
-#### update
-
-Install the latest version if available.
-
-- `-v, --verbose`: Show update script output.
-- `-y, --yes`: Automatically answer 'yes' to all questions.
-
-#### site-exclusions
-
-Control site exclusions with the following subcommands:
-
-- `add`: Add specified exclusions.
-- `remove`: Remove specified exclusions.
-- `show`: Show all exclusions.
-- `clear`: Clear all exclusions.
-- `mode`: Set VPN exclusion mode (general/selective) or show the current mode if no options are passed.
-
-## Projects that use AdGuard VPN CLI
-
-Please note that these projects are not affiliated with AdGuard, but are made by third-party developers and fans.
-
-- [adguardvpn-gui](https://github.com/SpazzRabbit/adguardvpn-gui): unofficial modern desktop GUI for the official CLI, by [@SpazzRabbit](https://github.com/SpazzRabbit).
-- [DMS AdGuard VPN Plugin](https://github.com/bernardopg/dms-adguard-vpn-plugin): DankMaterialShell plugin for controlling AdGuard VPN CLI from the desktop bar, by [@bernardopg](https://github.com/bernardopg).
-- [Docker images for AdGuard VPN CLI](https://github.com/supersunho/docker-adguardvpn-cli): multi-arch (amd64/arm64/armv7) builds with CI/CD, by [@supersunho](https://github.com/supersunho).
-- [adguardvpn-cli-gui](https://github.com/pablo-chitaksa/adguardvpn-cli-gui): simple Tkinter-based desktop GUI for the official CLI, by [@pablo-chitaksa](https://github.com/pablo-chitaksa).
+Der AdGuard VPN CLI ist Closed Source und wird unverändert aus den offiziellen Releases
+installiert; es gilt AdGuards eigene Lizenz. „AdGuard“ und „UniFi“ sind Marken ihrer
+jeweiligen Inhaber; dieses Projekt ist mit keinem der beiden Unternehmen verbunden.
